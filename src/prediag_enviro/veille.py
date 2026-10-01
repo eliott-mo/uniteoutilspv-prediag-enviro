@@ -41,6 +41,10 @@ FAMILLES = [
     ("statuts", "③ Statuts qui ont bougé"),
 ]
 
+#: Territoires qui s'appliquent partout : filtrer sur une région ne doit pas
+#: masquer la liste rouge nationale ni la liste rouge européenne.
+TERRITOIRES_SUPRA = {"Europe", "France", "Monde"}
+
 #: Lignes volontairement distinctes : populations, sous-espèces, complexes.
 #: Les signaler serait crier au loup — elles sont là exprès.
 _DELIBERE = re.compile(
@@ -58,6 +62,7 @@ class Constat:
     actuel: str
     propose: str
     source: str              # TaxRef v18, BDC-Statuts v18…
+    territoire: str = ""     # tel que BDC l'écrit — vide hors statuts
     detail: str = ""
     lien: str = ""           # fiche à ouvrir pour vérifier en un clic
     cle: str = ""            # identité stable du constat, pour la mémoire
@@ -231,7 +236,7 @@ def _statuts(cl: Classeur, idx: Index, statuts: Statuts) -> tuple[list[Constat],
                 famille="statuts", groupe=cl.groupe, ligne=t.ligne, taxon=t.libelle,
                 champ=f"{type_bdc} {territoire}".strip(), actuel=valeur,
                 propose=reference, source=f"BDC-Statuts v{statuts.version}",
-                detail=detail,
+                territoire=territoire, detail=detail,
                 lien=f"https://inpn.mnhn.fr/espece/cd_nom/{cd_ref}",
             ))
     return constats, {"taxons": apparies, "cellules_comparees": compares,
@@ -262,12 +267,19 @@ def analyser(classeurs: dict[str, Classeur], idx: Index, statuts: Statuts,
         )
 
     if territoires:
-        garder = {t.lower() for t in territoires}
+        # Comparaison sur la forme normalisée : « Centre-Val de Loire » dans le
+        # classeur et « Centre » dans BDC désignent la même région, et l'accent
+        # d'« Île-de-France » ne doit pas faire rater douze constats. Le filtre
+        # était une recherche de sous-chaîne dans le libellé : un territoire
+        # mal orthographié — ou simplement écrit comme le classeur l'écrit —
+        # renvoyait zéro constat régional sans rien dire.
+        from .classeurs import _cle_territoire, territoire_bdc
+        garder = {_cle_territoire(territoire_bdc(t)) for t in territoires}
         res.constats = [
             c for c in res.constats
             if c.famille != "statuts"
-            or any(t in c.champ.lower() for t in garder)
-            or c.champ.split()[0] in ("LRE", "LRM", "LRN", "PN", "DH", "DO", "PNA")
+            or _cle_territoire(c.territoire) in garder
+            or c.territoire in TERRITOIRES_SUPRA
         ]
 
     ordre = {cle: i for i, (cle, _) in enumerate(FAMILLES)}

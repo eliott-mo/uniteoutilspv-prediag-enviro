@@ -247,10 +247,16 @@ with onglet_a:
         with col_g:
             groupes = st.multiselect("Groupes", list(cs), default=list(cs))
         with col_t:
-            territoires = st.text_input(
-                "Territoires", placeholder="Normandie, Grand Est…",
-                help="Laisser vide pour tout passer. Les statuts nationaux et "
-                     "européens remontent de toute façon.",
+            # Liste plutôt que saisie libre : le nom d'une région diffère entre
+            # le classeur et BDC (« Centre-Val de Loire » contre « Centre »), et
+            # une saisie qui ne correspond à rien renvoyait les statuts
+            # nationaux — ce qui ressemblait à un résultat.
+            territoires = st.multiselect(
+                "Territoires", service.territoires_disponibles(cs, ctx.statuts),
+                placeholder="Tous les territoires",
+                help="Régions que BDC-Statuts couvre pour vos classeurs, "
+                     "écrites comme BDC les écrit. Les listes rouges nationale "
+                     "et européenne remontent de toute façon.",
             )
         with col_b:
             st.write("")
@@ -260,7 +266,7 @@ with onglet_a:
             with st.spinner("Comparaison aux référentiels…"):
                 res, masques = service.lancer_veille(
                     ctx, cs, memoire, groupes=groupes or None,
-                    territoires=[t.strip() for t in territoires.split(",") if t.strip()] or None,
+                    territoires=territoires or None,
                 )
             st.session_state.veille = res
             st.session_state.veille_masques = masques

@@ -104,3 +104,27 @@ def lancer_veille(contexte: Contexte, cs: dict[str, classeurs.Classeur],
 
 def memoire_projet(racine: Path) -> Memoire:
     return Memoire(racine / "memoire" / "arbitrages.json")
+
+
+def territoires_disponibles(cs: dict[str, classeurs.Classeur],
+                            statuts: bdc.Statuts) -> list[str]:
+    """Territoires réellement confrontables, **tels que les classeurs les écrivent**.
+
+    Proposer cette liste plutôt qu'une saisie libre évite deux pièges mesurés :
+    taper « Centre-Val de Loire », le nom que porte le classeur, ne ramenait
+    rien puisque BDC écrit « Centre » ; et un territoire inexistant renvoyait
+    les statuts nationaux et européens, ce qui ressemblait à un résultat.
+
+    Les libellés rendus sont ceux des colonnes, pas ceux de BDC : c'est le
+    vocabulaire de celle qui choisit. La traduction se fait au filtrage.
+    """
+    trouves: set[str] = set()
+    for cl in cs.values():
+        for colonne in cl.colonnes:
+            if not colonne.comparable or colonne.territoire_bdc in veille.TERRITOIRES_SUPRA:
+                continue
+            if statuts.couvre(colonne.type_bdc, colonne.territoire_bdc):
+                trouves.add(colonne.territoire or colonne.territoire_bdc)
+    # Tri sur la forme sans accents, sinon « Île-de-France » tombe après
+    # « Rhône-Alpes » et on la cherche.
+    return sorted(trouves, key=classeurs._cle_territoire)
