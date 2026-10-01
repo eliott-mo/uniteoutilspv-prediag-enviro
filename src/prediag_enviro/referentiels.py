@@ -24,6 +24,9 @@ import requests
 _UA = {"User-Agent": "Mozilla/5.0 (prediag-enviro ; UNITe)"}
 _TENTATIVES = 8
 
+#: Nom lisible de chaque référentiel, pour tout ce qui s'affiche.
+NOMS_AFFICHES = {"taxref": "TaxRef", "bdc_statuts": "BDC-Statuts"}
+
 
 @dataclass
 class Referentiel:
@@ -35,7 +38,7 @@ class Referentiel:
 
     def citation(self, attribution: str) -> str:
         """Mention de paternité exigée par la Licence Ouverte."""
-        nom = {"taxref": "TaxRef", "bdc_statuts": "BDC-Statuts"}.get(self.cle, self.cle)
+        nom = NOMS_AFFICHES.get(self.cle, self.cle)
         return f"{nom} v{self.version} — {attribution}, récupéré le {self.recupere_le}"
 
 
@@ -113,7 +116,15 @@ def _ecrire_manifeste(dossier: Path, refs: dict[str, Referentiel]) -> None:
 def assurer(cfg: dict, dossier: Path, forcer: bool = False) -> dict[str, Referentiel]:
     """Garantit la présence locale des référentiels déclarés dans sources.yml.
 
-    Ne retélécharge pas ce qui est déjà là, sauf `forcer=True`.
+    Ne retélécharge pas ce qui est déjà là. `forcer=True` **supprime d'abord**
+    l'archive locale : sans ça la reprise voyait un fichier complet et rendait
+    la main sans rien faire, tout en réécrivant la date de récupération — une
+    date fausse citée ensuite dans chaque rapport, alors que la licence impose
+    de citer la source *et sa date*.
+
+    Ce forçage ne sert qu'à remplacer une archive corrompue. Il ne peut pas
+    apporter une version plus récente : l'URL est épinglée dans `sources.yml`.
+    Pour cela, voir `versions_publiees()`.
     """
     dossier.mkdir(parents=True, exist_ok=True)
     deja = lire_manifeste(dossier)
@@ -122,9 +133,10 @@ def assurer(cfg: dict, dossier: Path, forcer: bool = False) -> dict[str, Referen
     for cle, spec in cfg["referentiels"].items():
         dest = dossier / spec["fichier"]
         connu = deja.get(cle)
+        if forcer and dest.exists():
+            dest.unlink()
         a_jour = (
-            not forcer
-            and connu is not None
+            connu is not None
             and connu.version == spec["version"]
             and dest.exists()
         )
@@ -142,6 +154,63 @@ def assurer(cfg: dict, dossier: Path, forcer: bool = False) -> dict[str, Referen
 
     _ecrire_manifeste(dossier, refs)
     return refs
+
+
+#: Libellé de chaque référentiel sur la page de l'INPN, pour y lire sa version.
+_LIBELLE_INPN = {"taxref": "TaxRef", "bdc_statuts": "BDC Statuts"}
+
+
+def versions_publiees(cfg: dict, timeout: int = 30) -> dict[str, str]:
+    """Versions actuellement publiées par l'INPN, lues sur sa page de diffusion.
+
+    L'épinglage protège la reproductibilité, mais il faut bien savoir un jour
+    qu'une version est sortie. La page liste chaque référentiel suivi de sa
+    version ; on la lit plutôt que de deviner une URL, parce que le nom de
+    fichier change d'une version à l'autre (`TAXREF_v18_2025.zip`).
+
+    Renvoie `{clé: version}` pour ce qui a pu être lu. Un dictionnaire vide
+    signifie que la page n'a pas pu être consultée — à ne pas confondre avec
+    « rien de neuf ».
+    """
+    import re
+
+    try:
+        reponse = requests.get(cfg["page_source"], headers=_UA, timeout=timeout)
+        reponse.raise_for_status()
+    except Exception:  # noqa: BLE001
+        return {}
+
+    plat = re.sub(r"(\s*\|\s*)+", " | ",
+                  re.sub(r"<[^>]+>", " | ", re.sub(r"\s+", " ", reponse.text)))
+    bouts = [b.strip() for b in plat.split("|") if b.strip()]
+
+    trouvees: dict[str, str] = {}
+    for cle, libelle in _LIBELLE_INPN.items():
+        if cle not in cfg["referentiels"]:
+            continue
+        for i, bout in enumerate(bouts):
+            if bout != libelle:
+                continue
+            # La version suit la description : premier jeton purement numérique
+            # (« 18 ») ou daté (« 06/2025 ») dans les cellules qui suivent.
+            for suivant in bouts[i + 1:i + 12]:
+                if re.fullmatch(r"\d{1,2}", suivant) or re.fullmatch(r"\d{2}/\d{4}", suivant):
+                    trouvees[cle] = suivant
+                    break
+            break
+    return trouvees
+
+
+def comparer_versions(cfg: dict) -> tuple[dict[str, tuple[str, str]], bool]:
+    """Compare l'épinglage local aux versions publiées.
+
+    Renvoie (`{clé: (épinglée, publiée)}`, `consultation_reussie`).
+    """
+    publiees = versions_publiees(cfg)
+    if not publiees:
+        return {}, False
+    return ({cle: (spec["version"], publiees.get(cle, "?"))
+             for cle, spec in cfg["referentiels"].items()}, True)
 
 
 def bandeau_versions(refs: dict[str, Referentiel], attribution: str) -> list[str]:

@@ -33,6 +33,7 @@ sys.path.insert(0, str(RACINE / "src"))
 from prediag_enviro import communes as mod_communes  # noqa: E402
 from prediag_enviro import rapport as mod_rapport  # noqa: E402
 from prediag_enviro import recoupement as mod_recoupement  # noqa: E402
+from prediag_enviro import referentiels  # noqa: E402
 from prediag_enviro import service, veille, vocabulaire  # noqa: E402
 from prediag_enviro import sortie_word as mod_word  # noqa: E402
 from prediag_enviro.memoire import ACCEPTE, A_REVOIR, DECISIONS, REFUSE  # noqa: E402
@@ -155,11 +156,46 @@ with onglet_a:
             "Licence Ouverte (Etalab) — réutilisation libre, y compris "
             "commerciale, sous réserve de citer la source et sa date."
         )
-        if st.button("Rafraîchir les référentiels", help="Retélécharge TaxRef et "
-                     "BDC-Statuts depuis l'INPN, puis reconstruit les index."):
-            service.charger_contexte(RACINE, forcer=True)
-            _contexte.clear()
-            st.rerun()
+        if st.button(
+                "Vérifier s'il existe une version plus récente",
+                help="Consulte la page de diffusion de l'INPN et compare à ce "
+                     "que l'outil utilise. Les référentiels sont épinglés : "
+                     "deux études faites à six mois d'écart restent comparables, "
+                     "et changer de version est une décision, pas un effet de "
+                     "bord.",
+        ):
+            with st.spinner("Consultation de l'INPN…"):
+                etat, consulte = referentiels.comparer_versions(
+                    service.lire_config(RACINE)
+                )
+            if not consulte:
+                st.warning(
+                    "Page de l'INPN injoignable — impossible de dire si une "
+                    "version plus récente existe. Ce n'est pas « rien de neuf »."
+                )
+            else:
+                retard = {c: v for c, v in etat.items() if v[0] != v[1]}
+                if not retard:
+                    st.success(
+                        "À jour : "
+                        + " · ".join(
+                            f"{referentiels.NOMS_AFFICHES.get(c, c)} v{v[0]}"
+                            for c, v in etat.items()
+                        )
+                    )
+                else:
+                    for cle, (epinglee, publiee) in retard.items():
+                        nom = referentiels.NOMS_AFFICHES.get(cle, cle)
+                        st.warning(
+                            f"**{nom}** : l'outil utilise la v{epinglee}, "
+                            f"l'INPN publie la v{publiee}."
+                        )
+                    st.caption(
+                        "Pour basculer : mettre à jour `version` et `url` dans "
+                        "`config/sources.yml`, puis relancer. Les études déjà "
+                        "produites citent l'ancienne version — c'est voulu, "
+                        "elles restent vérifiables en l'état."
+                    )
 
     with col_classeurs:
         if not cs:
