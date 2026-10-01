@@ -33,7 +33,7 @@ sys.path.insert(0, str(RACINE / "src"))
 from prediag_enviro import communes as mod_communes  # noqa: E402
 from prediag_enviro import rapport as mod_rapport  # noqa: E402
 from prediag_enviro import recoupement as mod_recoupement  # noqa: E402
-from prediag_enviro import service, veille  # noqa: E402
+from prediag_enviro import service, veille, vocabulaire  # noqa: E402
 from prediag_enviro import sortie_word as mod_word  # noqa: E402
 from prediag_enviro.memoire import ACCEPTE, A_REVOIR, DECISIONS, REFUSE  # noqa: E402
 
@@ -41,6 +41,13 @@ from prediag_enviro.memoire import ACCEPTE, A_REVOIR, DECISIONS, REFUSE  # noqa:
 #: outils UNITe portent tous le leur, et le chef de projet qui en ouvre
 #: plusieurs les distingue dans sa barre d'onglets avant d'avoir lu un mot.
 PICTO = "🦉"
+
+#: Vert « couvert » et orange « partiel », repris de l'échelle de classement
+#: partagée par extraction-topo-rge et pv-topo-analyzer. Ces deux teintes-là
+#: se lisent aussi bien sur fond clair que sur fond sombre, ce qui compte :
+#: l'app suit le thème Streamlit, donc celui du poste.
+VERT_COUVERT = "#4CAF50"
+ORANGE_PARTIEL = "#FF9800"
 
 st.set_page_config(
     page_title="Prédiag environnemental", page_icon=PICTO, layout="wide"
@@ -157,13 +164,46 @@ with onglet_a:
                 f"B-Statuts (noms reconnus : {', '.join(service.MOTIFS.values())})."
             )
         else:
-            st.dataframe(
-                pd.DataFrame([{
+            # Deux manques très différents se cachent derrière un même écart.
+            #
+            # Les colonnes de protection (PN, PR, DO) échappent partout, pour la
+            # même raison de vocabulaire : c'est structurel, identique d'un
+            # classeur à l'autre, et ça ne dit rien de la qualité de la veille.
+            # Les colonnes périodisées, elles, n'échappent qu'aux oiseaux — et
+            # là 38 listes rouges régionales sur 43 sortent du champ. C'est ce
+            # manque-là qu'il faut voir.
+            #
+            # D'où le voyant : vert quand seules les protections manquent,
+            # orange quand des listes rouges manquent aussi. Une règle « vert =
+            # tout couvert » n'allumerait jamais le vert, et un voyant qui ne
+            # change pas ne se regarde plus.
+            lignes_couverture = []
+            for groupe, cl in cs.items():
+                typees = [c for c in cl.colonnes if c.type_bdc]
+                confrontables = [c for c in typees
+                                 if vocabulaire.comparable(c.type_bdc)]
+                confrontees = [c for c in cl.colonnes if c.comparable]
+                lignes_couverture.append({
                     "Classeur": groupe,
                     "Taxons": len(cl.taxons),
-                    "Colonnes de statut": sum(1 for c in cl.colonnes if c.type_bdc),
-                    "Confrontées à BDC": sum(1 for c in cl.colonnes if c.comparable),
-                } for groupe, cl in cs.items()]),
+                    "Colonnes de statut": len(typees),
+                    "Confrontées à BDC": len(confrontees),
+                    "_complet": len(confrontees) == len(confrontables) and confrontables,
+                })
+            couverture = pd.DataFrame(lignes_couverture)
+            complets = couverture.pop("_complet")
+
+            # Couleurs reprises du parc (extraction-topo-rge, pv-topo-analyzer)
+            # pour rester cohérent d'un outil à l'autre.
+            def _teinte(colonne: pd.Series) -> list[str]:
+                return [
+                    f"color: {VERT_COUVERT if ok else ORANGE_PARTIEL};"
+                    " font-weight: 600"
+                    for ok in complets
+                ]
+
+            st.dataframe(
+                couverture.style.apply(_teinte, subset=["Confrontées à BDC"]),
                 hide_index=True, width="stretch",
                 column_config={
                     "Classeur": st.column_config.TextColumn(
@@ -179,17 +219,24 @@ with onglet_a:
                              "protections, directives, ZNIEFF déterminantes."),
                     "Confrontées à BDC": st.column_config.NumberColumn(
                         format="%d",
-                        help="Celles que la veille compare réellement. Les autres "
-                             "sont écartées soit parce qu'elles sont périodisées "
-                             "(BDC ne distingue pas nicheurs / hivernants / de "
-                             "passage), soit parce que les deux sources ne codent "
-                             "pas pareil — BDC désigne l'arrêté, le classeur "
-                             "l'article."),
+                        help="Celles que la veille compare réellement. En vert : "
+                             "seules les colonnes de protection échappent, ce qui "
+                             "est le cas partout (BDC désigne l'arrêté, le "
+                             "classeur l'article). En orange : des listes rouges "
+                             "échappent aussi, faute de pouvoir rattacher une "
+                             "période — BDC ne distingue pas nicheurs, hivernants "
+                             "et de passage."),
                 },
             )
             st.caption(
-                "Le classeur oiseaux est le moins couvert : 38 de ses "
-                "50 colonnes sont périodisées, et BDC ne porte pas la période."
+                f"<span style='color:{VERT_COUVERT};font-weight:600'>Vert</span> : "
+                "il ne manque que les colonnes de protection, ce qui est le cas "
+                "partout. "
+                f"<span style='color:{ORANGE_PARTIEL};font-weight:600'>Orange</span> : "
+                "des listes rouges manquent aussi. Seul le classeur oiseaux est "
+                "dans ce cas — 38 de ses 43 colonnes régionales sont périodisées, "
+                "et BDC ne porte pas la période.",
+                unsafe_allow_html=True,
             )
 
     if cs:
