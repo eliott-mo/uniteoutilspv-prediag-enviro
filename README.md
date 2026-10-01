@@ -3,12 +3,18 @@
 Outillage du pré-diagnostic environnemental bibliographique, pour l'équipe
 développement PV d'UNITe.
 
-L'outil comporte deux volets. **Seul le volet 1 est implémenté.**
+Deux onglets, dans l'ordre où on s'en sert.
 
-| Volet | Objet | État |
-|---|---|---|
-| **1 · Veille** | garder à jour les classeurs B-Statuts de référence | fonctionnel |
-| **2 · Prédiag** | pré-remplir un prédiag à partir d'une emprise projet | à venir |
+| Onglet | Objet |
+|---|---|
+| **A · Mise à jour des tables** | ce qui a bougé dans les référentiels depuis la dernière révision des classeurs B-Statuts |
+| **B · Prédiag** | emprise projet, communes, recoupement des sources d'espèces, tableaux Word |
+
+```bash
+streamlit run app.py
+```
+
+La ligne de commande reste disponible pour l'onglet A : `python run_veille.py`.
 
 ---
 
@@ -39,7 +45,7 @@ d'importance :
 
 ---
 
-## Volet 1 — la veille
+## Onglet A — la veille
 
 ### Installation
 
@@ -52,6 +58,8 @@ Déposer les six classeurs dans `classeurs/`. Les noms sont reconnus par motif
 `*macroh*.xlsx`, `*araign*.xlsx`).
 
 ### Usage
+
+L'interface fait tout cela ; la ligne de commande sert au lot et à la relecture.
 
 ```bash
 python run_veille.py                               # tout
@@ -92,6 +100,42 @@ Le « refusé » compte autant que l'« accepté » : il est retenu, et le const
 revient que si la source a rebougé depuis. Sans cette mémoire, chaque passage
 reproposerait les mêmes centaines de lignes et l'outil finirait par ne plus être
 ouvert.
+
+---
+
+## Onglet B — le prédiag
+
+Six étapes, chacune avec son point de contrôle.
+
+1. **Périmètre du projet** — ZIP de shapefile, KML ou GeoJSON. Le contrôle
+   d'entrée s'affiche avant tout calcul : entités, projection lue dans le
+   `.prj`, surface, emprise. La surface est celle de l'union et non la somme
+   des entités — sur l'emprise de Périgny, les cinq polygones se recouvrent et
+   sommer annoncerait 108,43 ha au lieu de 54,51. Le recouvrement est signalé.
+2. **Communes concernées** — intersection géométrique, avec la **part de
+   surface** de chacune, parce que c'est ce qui fonde la décision. Décochables,
+   et une commune s'ajoute par son code INSEE. Périgny en concerne trois :
+   65 / 30 / 4,9 %.
+3. **Aires d'étude** — immédiate et rapprochée, pré-remplies d'après le guide
+   du ministère (2016), modifiables.
+4. **Sources d'espèces** — on dépose ce qu'on a trouvé : exports Excel ou CSV,
+   PDF, captures d'écran. Trois étiquettes par fichier (commune, groupe,
+   source), devinées du nom de fichier et corrigeables.
+5. **Liste recoupée** — appariement sur TaxRef, dédoublonnage par `cd_ref`,
+   date la plus récente retenue, conflits signalés. Les **non résolus** se
+   corrigent à la main, et l'outil retient l'association pour les études
+   suivantes.
+6. **Tableau Word** — aux conventions UNITe, prêt à coller dans l'étude.
+
+### Ce que l'onglet B ne fait pas
+
+Il ne va pas chercher les occurrences. Le choix des sources est un jugement
+d'experte — quelle source fait autorité pour tel groupe dans telle région —
+qu'on n'a aucune chance de coder. L'outil recoupe ce qu'on lui donne.
+
+Il ne rédige pas l'interprétation : les interactions probables entre un zonage
+et la ZIP, le raisonnement sur les corridors, les exceptions. C'est ce qui fait
+la valeur du document.
 
 ---
 
@@ -171,6 +215,8 @@ Deux règles font l'essentiel de la fiabilité :
 ## Organisation
 
 ```
+app.py                    l'interface, deux onglets
+run_veille.py             la veille en ligne de commande
 config/sources.yml        référentiels épinglés (URL, version)
 classeurs/                les six classeurs B-Statuts          (hors dépôt)
 referentiels/             archives INPN + index en cache       (hors dépôt)
@@ -186,6 +232,10 @@ src/prediag_enviro/
     veille.py         production des constats
     memoire.py        arbitrages et alias persistés
     rapport.py        sortie Excel
+    communes.py       emprise projet, communes et parts de surface
+    recoupement.py    sources d'espèces déposées → liste unique
+    sortie_word.py    tableaux aux conventions UNITe
+    service.py        orchestration partagée interface / ligne de commande
 ```
 
 `classeurs.py` mérite un mot : les six fichiers n'ont pas la même disposition
@@ -207,6 +257,10 @@ les en-têtes et leurs plages fusionnées quand il est absent.
 - **Les listes rouges européennes de BDC sont sans édition déclarée.** Les
   écarts constatés sur `LRE` ressemblent à des différences d'édition plutôt
   qu'à des erreurs, mais rien dans les données ne permet de trancher.
+- **Les zonages ne sont pas encore produits** : ZNIEFF, Natura 2000, espaces
+  protégés et inventaire du patrimoine géologique sont téléchargeables chez
+  l'INPN et alimenteront les tableaux 8 à 10 et leurs cartes, mais la chaîne
+  n'est pas écrite.
 - **L'écriture dans les classeurs n'est pas implémentée**, délibérément. Le jour
   où elle le sera, elle passera par le pilotage d'Excel (et non par une
   réécriture du fichier), travaillera sur copie horodatée, n'appliquera que les

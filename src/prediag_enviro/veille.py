@@ -36,7 +36,7 @@ from .taxref import Index, normaliser
 
 #: Familles, dans l'ordre d'affichage du rapport.
 FAMILLES = [
-    ("corriger", "① À corriger dans ton fichier"),
+    ("corriger", "① À corriger dans le classeur"),
     ("taxonomie", "② Taxonomie à rafraîchir"),
     ("statuts", "③ Statuts qui ont bougé"),
 ]
