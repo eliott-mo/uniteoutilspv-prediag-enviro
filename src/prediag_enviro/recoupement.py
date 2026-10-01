@@ -330,8 +330,10 @@ def consolider(depots: list[Depot], idx: Index,
             if espece is None:
                 espece = Espece(
                     cd_ref=m.cd_ref,
-                    nom_scientifique=taxon.nom_valide if taxon else m.nom_brut,
-                    nom_commun=m.nom_brut if not taxon else (taxon.nom_valide or m.nom_brut),
+                    # LB_NOM, pas NOM_VALIDE : le binôme seul, sans l'auteur.
+                    # Dans ses tableaux l'auteur a sa propre colonne.
+                    nom_scientifique=taxon.lb_nom if taxon else m.nom_brut,
+                    nom_commun=m.nom_brut,
                     groupe=depot.groupe,
                 )
                 # Nom affiché : ce que la source a écrit, sauf si elle n'a
