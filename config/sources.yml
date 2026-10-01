@@ -1,0 +1,29 @@
+# Référentiels figés. On ne tape JAMAIS une API en direct pendant une étude :
+# on télécharge, on épingle la version, et chaque sortie porte la version utilisée.
+#
+# Licence : Licence Ouverte / Open Licence (Etalab) — réutilisation commerciale
+# autorisée sous réserve de citer la source ET sa date de mise à jour.
+# Source : Muséum national d'Histoire naturelle / PatriNat (OFB-MNHN-CNRS-IRD)
+# https://inpn.mnhn.fr/referentiels-donnees
+
+attribution: "Muséum national d'Histoire naturelle / PatriNat (OFB-MNHN-CNRS-IRD)"
+page_source: "https://inpn.mnhn.fr/referentiels-donnees"
+
+referentiels:
+  taxref:
+    version: "18"
+    url: "https://assets.patrinat.fr/files/referentiel/TAXREF_v18_2025.zip"
+    fichier: "TAXREF.zip"
+    membres:
+      principal: "TAXREFv18.txt"
+      vernaculaires: "TAXVERNv18.txt"
+      disparus: "CDNOM_DISPARUS.txt"
+      changements: "TAXREF_CHANGES.txt"
+
+  bdc_statuts:
+    version: "18"
+    url: "https://assets.patrinat.fr/files/referentiel/BDC.zip"
+    fichier: "BDC.zip"
+    membres:
+      principal: "BDC_18/bdc_18_01.csv"
+      types: "BDC_18/BDC_STATUTS_TYPES_18.csv"

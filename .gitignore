@@ -1,0 +1,23 @@
+# Référentiels téléchargés (volumineux, reconstruits par `python run_veille.py --maj-referentiels`)
+referentiels/*.zip
+referentiels/*.pkl
+referentiels/manifeste.json
+
+# Classeurs B-Statuts de travail (données métier, pas de code)
+classeurs/*.xlsx
+classeurs/*.xls
+
+# Sorties
+sorties/*.xlsx
+sorties/*.csv
+
+# Mémoire de l'outil (décisions, alias) — locale par défaut
+memoire/*.json
+
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+Thumbs.db
+memoire/*.json
+!memoire/.gitkeep
