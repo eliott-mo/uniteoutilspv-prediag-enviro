@@ -159,12 +159,37 @@ with onglet_a:
         else:
             st.dataframe(
                 pd.DataFrame([{
-                    "Groupe": groupe,
+                    "Classeur": groupe,
                     "Taxons": len(cl.taxons),
-                    "Colonnes": len(cl.colonnes),
-                    "Comparables": sum(1 for c in cl.colonnes if c.comparable),
+                    "Colonnes de statut": sum(1 for c in cl.colonnes if c.type_bdc),
+                    "Confrontées à BDC": sum(1 for c in cl.colonnes if c.comparable),
                 } for groupe, cl in cs.items()]),
                 hide_index=True, width="stretch",
+                column_config={
+                    "Classeur": st.column_config.TextColumn(
+                        help="Le fichier B-Statuts lu dans `classeurs/`, un par "
+                             "groupe taxonomique."),
+                    "Taxons": st.column_config.NumberColumn(
+                        format="%d",
+                        help="Lignes de l'onglet « Statuts » : espèces, mais "
+                             "aussi sous-espèces et populations évaluées à part."),
+                    "Colonnes de statut": st.column_config.NumberColumn(
+                        format="%d",
+                        help="Colonnes dont le type est reconnu : listes rouges, "
+                             "protections, directives, ZNIEFF déterminantes."),
+                    "Confrontées à BDC": st.column_config.NumberColumn(
+                        format="%d",
+                        help="Celles que la veille compare réellement. Les autres "
+                             "sont écartées soit parce qu'elles sont périodisées "
+                             "(BDC ne distingue pas nicheurs / hivernants / de "
+                             "passage), soit parce que les deux sources ne codent "
+                             "pas pareil — BDC désigne l'arrêté, le classeur "
+                             "l'article."),
+                },
+            )
+            st.caption(
+                "Le classeur oiseaux est le moins couvert : 38 de ses "
+                "50 colonnes sont périodisées, et BDC ne porte pas la période."
             )
 
     if cs:

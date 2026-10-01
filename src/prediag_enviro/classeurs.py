@@ -104,12 +104,24 @@ class ColonneStatut:
 
     @property
     def comparable(self) -> bool:
-        """Colonne qu'on peut confronter à BDC-Statuts.
+        """Colonne réellement confrontée à BDC-Statuts.
 
-        BDC ne distingue pas les périodes : on ne compare donc que les colonnes
-        sans période, sous peine de confronter « nicheurs » à un statut global.
+        Trois conditions, et il faut les trois :
+
+        * la colonne porte un type reconnu ;
+        * elle n'est pas périodisée — BDC ne distingue pas nicheurs, hivernants
+          et de passage, confronter « nicheurs » à un statut global n'aurait
+          pas de sens ;
+        * les deux vocabulaires se rejoignent. `PN`, `PR` et `DO` échouent ici :
+          BDC désigne l'arrêté (`NO3`, `RV93`) ou l'annexe (`CDO1`) là où le
+          classeur écrit l'article (« Art. 3 ») ou le code espèce (`A092`).
+
+        La troisième a été oubliée un temps : le décompte affiché annonçait 11
+        colonnes pour les oiseaux alors que 9 seulement étaient confrontées.
         """
-        return bool(self.type_bdc) and not self.periode
+        from . import vocabulaire
+        return (bool(self.type_bdc) and not self.periode
+                and vocabulaire.comparable(self.type_bdc))
 
 
 @dataclass
