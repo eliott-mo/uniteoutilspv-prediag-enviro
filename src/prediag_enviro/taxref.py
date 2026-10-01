@@ -37,6 +37,9 @@ from pathlib import Path
 
 csv.field_size_limit(10 ** 7)
 
+#: Change à chaque modification de la forme sérialisée (invalide les caches).
+_FORMAT_CACHE = 2
+
 # Groupes INPN (GROUP2_INPN) admis pour chaque classeur B-Statuts.
 GROUPES_INPN: dict[str, set[str]] = {
     "oiseaux": {"Oiseaux"},
@@ -71,6 +74,7 @@ class Taxon:
     nom_valide: str      # nom scientifique du cd_ref
     rang: str            # ES, SSES, GN…
     groupe: str          # GROUP2_INPN
+    nom_vern: str = ""   # nom français de référence, pour les tableaux d'étude
 
     @property
     def est_synonyme(self) -> bool:
@@ -132,6 +136,7 @@ class Index:
                     nom_valide=(ligne["NOM_VALIDE"] or "").strip(),
                     rang=(ligne["RANG"] or "").strip(),
                     groupe=(ligne["GROUP2_INPN"] or "").strip(),
+                    nom_vern=str(ligne["NOM_VERN"] or "").split(",")[0].strip(),
                 )
                 forme = normaliser(ligne["LB_NOM"])
                 if forme:
@@ -176,7 +181,8 @@ class Index:
         if cache and cache.exists():
             try:
                 donnees = pickle.loads(cache.read_bytes())
-                if donnees.get("version") == version:
+                if (donnees.get("version") == version
+                        and donnees.get("format") == _FORMAT_CACHE):
                     return cls(donnees["taxons"], donnees["vern"], donnees["sci"],
                                donnees["disparus"], version)
             except Exception:  # noqa: BLE001
@@ -188,6 +194,7 @@ class Index:
             cache.write_bytes(pickle.dumps({
                 "taxons": index.taxons, "vern": index.vern, "sci": index.sci,
                 "disparus": index.disparus, "version": version,
+                "format": _FORMAT_CACHE,
             }))
         return index
 
