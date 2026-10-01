@@ -51,13 +51,26 @@ def _taille_distante(url: str) -> int | None:
         return None
 
 
-def telecharger(url: str, dest: Path, attendu: int | None = None) -> Path:
-    """Télécharge avec reprise. Renvoie le chemin une fois l'archive complète."""
+def telecharger(url: str, dest: Path, attendu: int | None = None,
+                progression=None) -> Path:
+    """Télécharge avec reprise. Renvoie le chemin une fois l'archive complète.
+
+    Les archives de zonages pèsent jusqu'à 220 Mo, souvent récupérées depuis un
+    partage de connexion : la coupure n'est pas l'exception, c'est le régime
+    normal. La reprise repart donc de l'octet reçu (`Range`) et l'attente
+    double à chaque échec, jusqu'à une minute — une coupure DNS de trente
+    secondes faisait auparavant tomber les huit tentatives en seize.
+
+    Une tentative qui a fait progresser le fichier ne compte pas comme un
+    échec : seule l'absence de progrès épuise le compteur, sans quoi un gros
+    téléchargement haché en dix tronçons échouerait alors qu'il avance.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     if attendu is None:
         attendu = _taille_distante(url)
 
-    for tentative in range(_TENTATIVES):
+    echecs_sans_progres = 0
+    while echecs_sans_progres < _TENTATIVES:
         present = dest.stat().st_size if dest.exists() else 0
         if attendu and present >= attendu:
             return dest
@@ -71,13 +84,22 @@ def telecharger(url: str, dest: Path, attendu: int | None = None) -> Path:
             with open(dest, mode) as f:
                 for bloc in r.iter_content(1 << 19):
                     f.write(bloc)
+                    if progression is not None and attendu:
+                        progression(f.tell() if mode == "wb" else present + f.tell(),
+                                    attendu)
         except Exception as e:  # noqa: BLE001
-            if tentative == _TENTATIVES - 1:
+            obtenu = dest.stat().st_size if dest.exists() else 0
+            if obtenu > present:
+                echecs_sans_progres = 0      # ça a avancé : on ne pénalise pas
+            else:
+                echecs_sans_progres += 1
+            if echecs_sans_progres >= _TENTATIVES:
                 raise RuntimeError(
-                    f"Téléchargement de {url} interrompu après {_TENTATIVES} tentatives "
-                    f"({dest.stat().st_size if dest.exists() else 0} octets reçus) : {e}"
+                    f"Téléchargement de {url} interrompu après {_TENTATIVES} "
+                    f"tentatives sans progrès ({obtenu} octets reçus sur "
+                    f"{attendu or '?'}) : {e}"
                 ) from e
-            time.sleep(2)
+            time.sleep(min(2 ** echecs_sans_progres, 60))
 
     if attendu and dest.stat().st_size < attendu:
         raise RuntimeError(

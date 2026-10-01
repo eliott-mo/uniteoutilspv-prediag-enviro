@@ -1,7 +1,13 @@
-# Référentiels téléchargés (volumineux, reconstruits par `python run_veille.py --maj-referentiels`)
-referentiels/*.zip
-referentiels/*.pkl
-referentiels/manifeste.json
+# Référentiels : archives téléchargées, index en cache, couches extraites,
+# contours communaux. Rien de tout cela n'a sa place dans le dépôt — c'est de
+# la donnée publique reconstruite à la demande depuis config/sources.yml.
+#
+# On ignore le dossier entier plutôt que des extensions : la première version
+# ne listait que *.zip et *.pkl, et le dossier d'extraction _cache_sig/ est
+# passé au travers — 380 Mo de shapefiles dans un commit, dont un GeoPackage
+# de 147 Mo que GitHub refuse (limite dure : 100 Mo).
+referentiels/*
+!referentiels/.gitkeep
 
 # Classeurs B-Statuts de travail (données métier, pas de code)
 classeurs/*.xlsx

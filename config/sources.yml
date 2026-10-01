@@ -27,3 +27,27 @@ referentiels:
     membres:
       principal: "BDC_18/bdc_18_01.csv"
       types: "BDC_18/BDC_STATUTS_TYPES_18.csv"
+
+  # ── Zonages du patrimoine naturel ────────────────────────────────────────
+  # Alimentent les tableaux 8 à 10 de l'état initial et leurs cartes. Volumineux
+  # mais téléchargés une fois : une étude se fait alors sans réseau, et les
+  # WFS qui tombent ne bloquent plus personne.
+  znieff:
+    version: "06/2025"
+    url: "https://assets.patrinat.fr/files/donnees/znieff/ZNIEFF.zip"
+    fichier: "ZNIEFF.zip"
+
+  natura2000:
+    version: "12/2024"
+    url: "https://assets.patrinat.fr/files/donnees/natura2000/NATURA2000.zip"
+    fichier: "NATURA2000.zip"
+
+  espaces_proteges:
+    version: "07/2026"
+    url: "https://assets.patrinat.fr/files/donnees/ep/EP.zip"
+    fichier: "EP.zip"
+
+  patrimoine_geologique:
+    version: "07/2025"
+    url: "https://assets.patrinat.fr/files/donnees/inpg/INPG.zip"
+    fichier: "INPG.zip"
