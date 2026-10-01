@@ -138,6 +138,10 @@ onglet_a, onglet_b = st.tabs([
 # ══════════════════════════════════════════════════════════════════════════════
 with onglet_a:
     st.subheader("1 · État du référentiel")
+    st.caption(
+        "Quels référentiels INPN sont en place, et ce que vos classeurs "
+        "donnent à comparer."
+    )
 
     ctx = _contexte()
     cs = _classeurs(_jeton_classeurs())
@@ -242,6 +246,11 @@ with onglet_a:
     if cs:
         st.divider()
         st.subheader("2 · Vérifier ce qui a bougé")
+        st.caption(
+            "Confronte vos classeurs à TaxRef et BDC-Statuts. Restreignez "
+            "aux groupes et aux territoires de l'étude à venir, ou laissez "
+            "tout pour une revue complète."
+        )
 
         col_g, col_t, col_b = st.columns([2, 2, 1], gap="large")
         with col_g:
@@ -276,6 +285,11 @@ with onglet_a:
             masques = st.session_state.get("veille_masques", 0)
             st.divider()
             st.subheader("3 · Arbitrer")
+            st.caption(
+                "Ce qui diffère, par nature de constat. Renseignez la colonne "
+                "Décision : un refus est retenu lui aussi, et le constat ne "
+                "reviendra que si la source rebouge."
+            )
 
             mesures = st.columns(4)
             for colonne, (cle, titre) in zip(mesures, veille.FAMILLES):
@@ -359,8 +373,9 @@ with onglet_a:
 with onglet_b:
     st.subheader("1 · Périmètre du projet")
     st.caption(
-        "Archive ZIP d'un shapefile complet (`.shp`, `.shx`, `.dbf`, `.prj`), "
-        "ou fichier KML / GeoJSON."
+        "Charge la zone d'implantation potentielle et la contrôle avant tout "
+        "calcul. Archive ZIP d'un shapefile complet (`.shp`, `.shx`, `.dbf`, "
+        "`.prj`), ou fichier KML / GeoJSON."
     )
 
     depot_emprise = st.file_uploader(
@@ -393,6 +408,10 @@ with onglet_b:
 
         st.divider()
         st.subheader("2 · Communes concernées")
+        st.caption(
+            "Les communes que l'emprise touche, avec leur part de surface. "
+            "C'est sur elles que portera la recherche d'espèces."
+        )
 
         if "decoupage" not in st.session_state:
             with st.spinner("Intersection avec les contours communaux…"):
@@ -447,8 +466,9 @@ with onglet_b:
         st.divider()
         st.subheader("3 · Aires d'étude")
         st.caption(
-            "Rayons par défaut d'après le guide du ministère (2016), à ajuster "
-            "selon le projet."
+            "Les périmètres autour de l'emprise dans lesquels les enjeux seront "
+            "recherchés. Rayons par défaut d'après le guide du ministère (2016), "
+            "à ajuster selon le projet."
         )
         col_imm, col_rap = st.columns(2, gap="large")
         with col_imm:
@@ -463,9 +483,10 @@ with onglet_b:
         st.divider()
         st.subheader("4 · Sources d'espèces")
         st.caption(
-            "Déposez ce que vous avez trouvé : exports Excel ou CSV, PDF, "
-            "captures d'écran. Un export avec les noms latins vaut dix captures "
-            "— 98,6 % d'appariement contre 81 %."
+            "Déposez ce que vous avez relevé sur vos sources ; l'outil les "
+            "recoupe, il ne va rien chercher à votre place. Exports Excel ou "
+            "CSV, PDF, captures d'écran — un export avec les noms latins vaut "
+            "dix captures : 98,6 % d'appariement contre 81 %."
         )
 
         depots_sources = st.file_uploader(
@@ -520,6 +541,11 @@ with onglet_b:
         if resultat is not None:
             st.divider()
             st.subheader("5 · Liste recoupée")
+            st.caption(
+                "Vos sources fondues en une liste unique, dédoublonnée par "
+                "taxon. Les noms que TaxRef n'a pas reconnus sont isolés plus "
+                "bas, à corriger une fois pour toutes."
+            )
 
             col_e, col_n, col_t = st.columns(3)
             col_e.metric("Espèces", len(resultat.especes))
@@ -582,6 +608,10 @@ with onglet_b:
 
             st.divider()
             st.subheader("6 · Tableau Word")
+            st.caption(
+                "Le tableau d'espèces mis en forme, prêt à coller dans "
+                "l'étude — noms latins en italique, dates centrées."
+            )
 
             col_mod, col_gen = st.columns([2, 1], gap="large")
             with col_mod:
