@@ -80,6 +80,23 @@ def memoire() -> Path:
     return racine_donnees() / "memoire"
 
 
+def alias() -> Path:
+    """Dictionnaire d'alias — partagé, à côté de l'application.
+
+    Un nom d'espèce que TaxRef ne reconnaît pas est corrigé une fois à la main
+    puis retenu. Garder ce carnet sur chaque poste reviendrait à le reconstruire
+    autant de fois qu'il y a de chefs de projet, alors que la correction vaut
+    pour tout le monde : « Grande Tortue » désigne le même papillon en
+    Normandie et en Dordogne.
+
+    Un fichier par contributeur, et non un fichier commun : sur un dossier
+    synchronisé, deux personnes qui écrivent le même fichier produisent une
+    copie de conflit et une des deux contributions se perd. Chacun n'écrit que
+    le sien, la lecture les fusionne tous.
+    """
+    return racine_application() / "alias"
+
+
 def classeurs() -> Path:
     """Les classeurs B-Statuts, à côté du code : c'est un actif partagé.
 
@@ -102,6 +119,7 @@ def preparer() -> dict[str, Path]:
         "memoire": memoire(),
         "classeurs": classeurs(),
     }
+    emplacements["alias"] = alias()
     for cle in ("referentiels", "sorties", "memoire"):
         emplacements[cle].mkdir(parents=True, exist_ok=True)
     return emplacements

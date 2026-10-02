@@ -40,3 +40,7 @@ extraits/*
 
 # Destination de publication : locale au poste de developpement
 .destination-publication
+
+# Alias appris par l équipe : donnée de production, pas du code
+alias/*
+!alias/.gitkeep

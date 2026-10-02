@@ -56,8 +56,11 @@ CODE = [
     "config",
 ]
 
-#: Données : copiées uniquement à la première mise en place, et jamais écrasées.
-DONNEES = ["classeurs", "extraits"]
+#: Données : copiées uniquement à la première mise en place, et jamais
+#: écrasées. `alias/` contient ce que l'équipe a appris des noms d'espèces —
+#: l'écraser depuis un dossier de développement effacerait le travail de
+#: plusieurs personnes.
+DONNEES = ["classeurs", "extraits", "alias"]
 
 #: Jamais publié : dépôt git, caches, environnements, fichiers de travail.
 EXCLUS = {".git", "__pycache__", ".venv", "venv", ".pytest_cache", ".claude"}

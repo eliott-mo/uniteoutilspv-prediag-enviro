@@ -53,7 +53,8 @@ def main() -> int:
 
     cfg = yaml.safe_load((RACINE / "config" / "sources.yml").read_text(encoding="utf-8"))
     service.emplacements(RACINE)
-    memoire = Memoire(chemins.memoire() / "arbitrages.json")
+    memoire = Memoire(chemins.memoire() / "arbitrages.json",
+                      dossier_alias=chemins.alias())
 
     if args.relire:
         retenus = rapport.relire_decisions(args.relire, memoire)

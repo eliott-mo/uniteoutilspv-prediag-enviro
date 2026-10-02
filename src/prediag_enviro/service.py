@@ -104,7 +104,8 @@ def lancer_veille(contexte: Contexte, cs: dict[str, classeurs.Classeur],
 
 
 def memoire_projet(racine: Path) -> Memoire:
-    return Memoire(chemins.memoire() / "arbitrages.json")
+    return Memoire(chemins.memoire() / "arbitrages.json",
+                   dossier_alias=chemins.alias())
 
 
 def territoires_disponibles(cs: dict[str, classeurs.Classeur],

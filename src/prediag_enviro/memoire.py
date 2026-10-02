@@ -1,17 +1,35 @@
-"""Mémoire des arbitrages : ce qui rend la veille supportable dans la durée.
+"""Ce dont l'outil se souvient, et où.
 
-Sans elle, chaque passage reproposerait les mêmes dizaines de divergences et
-l'outil finirait par ne plus être ouvert. Le « refusé » compte donc autant que
-l'« accepté » : il est retenu, et le constat ne revient que si la source a
-rebougé depuis.
+Deux mémoires, de natures différentes, et c'est pourquoi elles ne vivent pas
+au même endroit.
 
-C'est aussi une trace. « Écarté en septembre 2026, notre édition odonates est
-plus récente que BDC » vaut mieux que de re-trancher la même question dans six
-mois sans se rappeler pourquoi.
+**Les arbitrages** — les décisions rendues sur les constats de veille. Elles
+n'appartiennent qu'à la personne qui tient les classeurs à jour, et elles
+restent sur sa machine. Sans elles, chaque passage reproposerait les mêmes
+dizaines de divergences et l'outil finirait par ne plus être ouvert : le
+« refusé » compte donc autant que l'« accepté », et un constat écarté ne revient
+que si la source a rebougé. C'est aussi une trace — « écarté en septembre 2026,
+notre édition odonates est plus récente que BDC » vaut mieux que de retrancher
+la même question six mois plus tard.
+
+**Les alias** — les noms d'espèces que TaxRef ne reconnaît pas et que quelqu'un
+a corrigés à la main. « Grande Tortue », « Demi-Deuil », « Machaon » : des noms
+que tout naturaliste emploie et que le référentiel n'indexe pas sous cette
+forme. Ceux-là sont **partagés**, parce que la correction vaut pour tout le
+monde : garder le carnet sur chaque poste reviendrait à le reconstruire autant
+de fois qu'il y a de chefs de projet, et le bac des non résolus ne se viderait
+jamais.
+
+Un fichier d'alias **par contributeur**, et non un fichier commun. Sur un
+dossier synchronisé, deux personnes qui écrivent le même fichier produisent une
+copie de conflit et une des deux contributions disparaît. Chacun n'écrit que le
+sien, la lecture les fusionne tous.
 """
 from __future__ import annotations
 
+import getpass
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -30,33 +48,74 @@ class Arbitrage:
     propose: str      # valeur proposée au moment de l'arbitrage
 
 
-class Memoire:
-    """Arbitrages et alias, persistés en JSON à côté du projet."""
+def _nom_contributeur() -> str:
+    """Nom de fichier sûr, tiré de l'identifiant Windows."""
+    try:
+        brut = getpass.getuser()
+    except Exception:  # noqa: BLE001
+        brut = "inconnu"
+    propre = re.sub(r"[^A-Za-z0-9._-]", "-", brut).strip("-")
+    return propre or "inconnu"
 
-    def __init__(self, chemin: Path):
+
+class Memoire:
+    """Arbitrages (locaux) et alias (partagés)."""
+
+    def __init__(self, chemin: Path, dossier_alias: Path | None = None):
         self.chemin = chemin
+        self.dossier_alias = dossier_alias
         self._arbitrages: dict[str, Arbitrage] = {}
         self._alias: dict[str, str] = {}
+        self._alias_locaux: dict[str, str] = {}   # ce que ce poste a appris
         self._charger()
 
+    # ------------------------------------------------------------ chargement
+
     def _charger(self) -> None:
-        if not self.chemin.exists():
-            return
-        try:
-            brut = json.loads(self.chemin.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            return
-        self._arbitrages = {
-            k: Arbitrage(**v) for k, v in brut.get("arbitrages", {}).items()
-        }
-        self._alias = dict(brut.get("alias", {}))
+        if self.chemin.exists():
+            try:
+                brut = json.loads(self.chemin.read_text(encoding="utf-8"))
+                self._arbitrages = {k: Arbitrage(**v)
+                                    for k, v in brut.get("arbitrages", {}).items()}
+                # Les alias vivaient autrefois ici : on les reprend sans rien
+                # perdre, et ils repartiront dans le dossier partagé.
+                self._alias_locaux = dict(brut.get("alias", {}))
+                self._alias.update(self._alias_locaux)
+            except Exception:  # noqa: BLE001
+                pass
+
+        if self.dossier_alias and self.dossier_alias.exists():
+            for fichier in sorted(self.dossier_alias.glob("*.json")):
+                try:
+                    partages = json.loads(fichier.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    continue
+                if isinstance(partages, dict):
+                    self._alias.update(partages)
+                    if fichier.name == f"{_nom_contributeur()}.json":
+                        self._alias_locaux.update(partages)
 
     def enregistrer(self) -> None:
         self.chemin.parent.mkdir(parents=True, exist_ok=True)
-        self.chemin.write_text(json.dumps({
-            "arbitrages": {k: vars(v) for k, v in self._arbitrages.items()},
-            "alias": self._alias,
-        }, indent=2, ensure_ascii=False), encoding="utf-8")
+        self.chemin.write_text(json.dumps(
+            {"arbitrages": {k: vars(v) for k, v in self._arbitrages.items()}},
+            indent=2, ensure_ascii=False), encoding="utf-8")
+
+        if self.dossier_alias is not None and self._alias_locaux:
+            self.dossier_alias.mkdir(parents=True, exist_ok=True)
+            fichier = self.dossier_alias / f"{_nom_contributeur()}.json"
+            # On relit avant d'écrire : le fichier a pu être synchronisé depuis
+            # un autre poste de la même personne.
+            fusion = dict(self._alias_locaux)
+            if fichier.exists():
+                try:
+                    ancien = json.loads(fichier.read_text(encoding="utf-8"))
+                    if isinstance(ancien, dict):
+                        fusion = {**ancien, **fusion}
+                except Exception:  # noqa: BLE001
+                    pass
+            fichier.write_text(json.dumps(fusion, indent=2, ensure_ascii=False,
+                                          sort_keys=True), encoding="utf-8")
 
     # ---------------------------------------------------------- arbitrages
 
@@ -86,7 +145,13 @@ class Memoire:
 
     def apprendre_alias(self, forme: str, cd_ref: str) -> None:
         self._alias[forme] = str(cd_ref)
+        self._alias_locaux[forme] = str(cd_ref)
 
     @property
     def nb_alias(self) -> int:
         return len(self._alias)
+
+    @property
+    def nb_alias_locaux(self) -> int:
+        """Ce que ce poste a appris — le reste vient des collègues."""
+        return len(self._alias_locaux)
