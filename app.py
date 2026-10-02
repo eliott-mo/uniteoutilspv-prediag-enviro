@@ -37,6 +37,7 @@ from prediag_enviro import referentiels  # noqa: E402
 from prediag_enviro import service, veille, vocabulaire  # noqa: E402
 from prediag_enviro import zonages as mod_zonages  # noqa: E402
 from prediag_enviro import cartes as mod_cartes  # noqa: E402
+from prediag_enviro import extraits as mod_extraits  # noqa: E402
 from prediag_enviro import sortie_word as mod_word  # noqa: E402
 from prediag_enviro.memoire import ACCEPTE, A_REVOIR, DECISIONS, REFUSE  # noqa: E402
 
@@ -415,6 +416,81 @@ with onglet_a:
                     "`python run_veille.py --relire`."
                 )
 
+    # ── Extraits départementaux ───────────────────────────────────────────
+    # Même rituel que la mise à jour des classeurs : on vient ici quand l'INPN
+    # publie, et on reconstruit ce que toute l'équipe utilisera.
+    st.divider()
+    st.subheader("4 · Extraits départementaux")
+    st.caption(
+        "Les zonages découpés par département, que les chefs de projet "
+        "utilisent pour leurs prédiags. Seul ce poste porte les 462 Mo "
+        "d'archives nationales qui servent à les produire."
+    )
+
+    etat_ext = service.etat_extraits(RACINE)
+    cfg_sources = service.lire_config(RACINE)
+    versions_zonages = {c: spec["version"]
+                        for c, spec in cfg_sources["referentiels"].items()
+                        if c in service.CLES_ZONAGES}
+
+    col_etat_e, col_act_e = st.columns([2, 1], gap="large")
+    with col_etat_e:
+        if etat_ext is None:
+            st.warning(
+                "Aucun extrait construit. Les chefs de projet ne pourront pas "
+                "produire de prédiag tant qu'ils n'existent pas."
+            )
+        else:
+            perimes = etat_ext.perime(versions_zonages)
+            if perimes:
+                st.warning(
+                    f"{etat_ext.nombre} département(s), construits le "
+                    f"{etat_ext.construit_le}. **À reconstruire** : "
+                    + ", ".join(referentiels.NOMS_AFFICHES.get(c, c)
+                                for c in perimes)
+                    + " a changé de version depuis."
+                )
+            else:
+                st.success(
+                    f"{etat_ext.nombre} département(s), construits le "
+                    f"{etat_ext.construit_le} — à jour."
+                )
+            st.caption("Versions utilisées : " + " · ".join(
+                f"{referentiels.NOMS_AFFICHES.get(c, c)} {v}"
+                for c, v in etat_ext.versions.items()))
+
+    with col_act_e:
+        st.write("")
+        if st.button("Reconstruire les extraits", width="stretch",
+                     key="btn_extraits"):
+            zone_e = st.empty()
+            barre = st.progress(0.0)
+            total = len(mod_extraits.departements_metropole())
+
+            def _avancer(message: str) -> None:
+                zone_e.info(message)
+                if "/" in message:
+                    try:
+                        fait = int(message.split("(")[1].split("/")[0])
+                        barre.progress(min(fait / total, 1.0))
+                    except Exception:  # noqa: BLE001
+                        pass
+
+            try:
+                service.construire_extraits(RACINE, progression=_avancer)
+                barre.progress(1.0)
+                st.success("Extraits reconstruits.")
+                st.rerun()
+            except Exception as erreur:  # noqa: BLE001
+                st.error(f"Construction impossible : {erreur}")
+
+    st.caption(
+        "Comptez quelques minutes de calcul pour les 96 départements, puis le "
+        "temps que OneDrive téléverse les fichiers. À lancer quand le bouton "
+        "de vérification de version signale du neuf, pas plus souvent : les "
+        "référentiels INPN sortent une à deux fois par an."
+    )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  VOLET B — Prédiag
@@ -538,16 +614,42 @@ with onglet_b:
             "leur intérêt. Rien à saisir : tout vient des référentiels INPN."
         )
 
+        departements = service.departements_de(decoupage)
+        etat_ext = service.etat_extraits(RACINE)
+        if departements:
+            st.caption(
+                "Département(s) du projet : " + ", ".join(departements)
+                + (f" · {etat_ext.nombre} extrait(s) disponible(s)"
+                   if etat_ext else " · aucun extrait, lecture des archives "
+                                    "nationales")
+            )
+
         if st.button("Croiser les zonages", type="primary", width="stretch",
                      key="btn_zonages"):
             zone = st.empty()
             try:
                 with st.spinner("Croisement…"):
-                    st.session_state.zonages = service.croiser_zonages(
-                        RACINE, emprise.union,
-                        aires=_aires_etude(),
-                        progression=lambda m: zone.info(m),
-                    )
+                    if etat_ext is not None and departements:
+                        # Voie normale : les extraits départementaux, quelques
+                        # mégaoctets au lieu des 462 Mo d'archives nationales.
+                        st.session_state.zonages = (
+                            service.croiser_zonages_extraits(
+                                RACINE, emprise.union, departements,
+                                aires=_aires_etude())
+                        )
+                    else:
+                        # Repli : le poste qui tient les référentiels à jour
+                        # porte les archives et peut s'en servir directement.
+                        st.session_state.zonages = service.croiser_zonages(
+                            RACINE, emprise.union, aires=_aires_etude(),
+                            progression=lambda m: zone.info(m))
+            except mod_extraits.DepartementAbsent as manque:
+                st.error(str(manque))
+                st.caption(
+                    "L'outil refuse plutôt que de rendre une liste vide : un "
+                    "prédiag qui annonce « aucun zonage » faute de données "
+                    "serait faux, et rien ne le signalerait à la lecture."
+                )
             except Exception as erreur:  # noqa: BLE001
                 st.error(f"Croisement impossible : {erreur}")
             zone.empty()

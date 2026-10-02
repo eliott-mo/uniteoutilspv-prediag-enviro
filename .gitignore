@@ -31,3 +31,9 @@ __pycache__/
 Thumbs.db
 memoire/*.json
 !memoire/.gitkeep
+
+# Extraits départementaux : produits par la maintenance, publiés à côté de
+# l'application pour les chefs de projet. ~650 Mo pour la France entière, et
+# autant à chaque nouvelle version INPN — l'historique git n'est pas leur place.
+extraits/*
+!extraits/.gitkeep

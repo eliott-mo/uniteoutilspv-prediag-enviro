@@ -16,7 +16,7 @@ from pathlib import Path
 
 import yaml
 
-from . import bdc, classeurs, referentiels, taxref, veille, zonages
+from . import bdc, classeurs, extraits, referentiels, taxref, veille, zonages
 from .memoire import Memoire
 
 #: Motifs de reconnaissance des classeurs déposés, par groupe.
@@ -157,4 +157,63 @@ def croiser_zonages(racine: Path, emprise_union, aires=None,
     return zonages.croiser(
         emprise_union, zonages.registre(), racine / "referentiels",
         racine / "referentiels" / "_cache_sig", fichiers, aires=aires,
+    )
+
+
+def departements_de(decoupage) -> list[str]:
+    """Départements des communes retenues, déduits du code INSEE.
+
+    Les deux premiers caractères suffisent partout, Corse comprise : ses
+    communes portent « 2A004 », « 2B033 », dont le préfixe est bien « 2A » et
+    « 2B ».
+    """
+    trouves = []
+    for commune in decoupage.retenues:
+        code = str(commune.code).strip()
+        if len(code) >= 2 and code[:2] not in trouves:
+            trouves.append(code[:2])
+    return sorted(trouves)
+
+
+def dossier_extraits(racine: Path) -> Path:
+    """Où vivent les extraits départementaux.
+
+    À côté de l'application : c'est un actif partagé, produit une fois et lu
+    par tout le monde, contrairement aux archives nationales qui ne servent
+    qu'à les produire.
+    """
+    return racine / "extraits"
+
+
+def croiser_zonages_extraits(racine: Path, emprise_union, departements: list[str],
+                             aires=None) -> zonages.Resultat:
+    """Croisement depuis les extraits — la voie normale pour un chef de projet.
+
+    Lève `extraits.DepartementAbsent` si le projet sort du périmètre construit,
+    plutôt que de rendre une liste vide qui passerait pour un résultat.
+    """
+    return extraits.croiser(emprise_union, departements,
+                            dossier_extraits(racine), aires=aires)
+
+
+def etat_extraits(racine: Path):
+    return extraits.etat(dossier_extraits(racine))
+
+
+def construire_extraits(racine: Path, departements: list[str] | None = None,
+                        progression=None):
+    """Reconstruit les extraits depuis les archives nationales.
+
+    Opération de maintenance : elle suppose les 462 Mo d'archives, que seule
+    la machine qui tient les référentiels à jour possède.
+    """
+    cfg = lire_config(racine)
+    fichiers, _ = preparer_zonages(racine, progression)
+    versions = {c: spec["version"] for c, spec in cfg["referentiels"].items()
+                if c in CLES_ZONAGES}
+    return extraits.construire(
+        departements or extraits.departements_metropole(),
+        racine / "referentiels", racine / "referentiels" / "_cache_sig",
+        fichiers, dossier_extraits(racine), versions=versions,
+        progression=progression,
     )
