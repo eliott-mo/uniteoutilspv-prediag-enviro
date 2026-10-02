@@ -109,6 +109,15 @@ class Resultat:
     zonages: list[Zonage] = field(default_factory=list)
     journal: list[str] = field(default_factory=list)
     manquants: list[str] = field(default_factory=list)
+    #: Géométries des zonages retenus, par type. Conservées pour la carto :
+    #: les retrouver demanderait de refaire le croisement, qui prend une
+    #: trentaine de secondes.
+    geometries: dict[str, "gpd.GeoDataFrame"] = field(default_factory=dict)
+
+    def couches(self, famille: str) -> dict[str, "gpd.GeoDataFrame"]:
+        """Géométries d'une famille, prêtes à cartographier."""
+        types = {z.type for z in self.par_famille(famille)}
+        return {t: g for t, g in self.geometries.items() if t in types}
 
     def par_famille(self, famille: str) -> list[Zonage]:
         return [z for z in self.zonages if z.famille == famille]
@@ -253,6 +262,8 @@ def croiser(emprise, sources: list[SourceZonage], archives_dir: Path, cache: Pat
             f"{source.type_libelle} : {len(retenus)} dans les aires d'étude "
             f"(sur {len(gdf)} au national)"
         )
+
+        res.geometries[source.type_libelle] = retenus[["_nom", "_id", "geometry"]]
 
         for _, ligne in retenus.iterrows():
             distance = float(ligne["_d"])

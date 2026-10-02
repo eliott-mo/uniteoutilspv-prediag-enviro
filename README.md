@@ -248,6 +248,28 @@ les en-têtes et leurs plages fusionnées quand il est absent.
 
 ---
 
+## Déploiement
+
+`packages.txt` déclare les dépendances système pour Streamlit Community Cloud :
+`tesseract-ocr` et `tesseract-ocr-fra`, ce dernier parce que sans le paquet de
+langue les accents sortent faux et l'appariement TaxRef échoue sur des noms
+pourtant corrects.
+
+**Ce fichier n'admet aucun commentaire.** Streamlit Cloud le passe tel quel à
+`apt-get` via `xargs` : une ligne commençant par `#` est traitée comme un nom de
+paquet, et une apostrophe française casse `xargs` avant même l'installation
+(`unmatched single quote`). Un commentaire d'une ligne a suffi à faire échouer
+un déploiement entier. `requirements.txt`, lui, accepte les commentaires — c'est
+pip qui le lit.
+
+**Réserve sur l'hébergement.** Les référentiels pèsent 550 Mo au total et
+l'extraction du GeoPackage des espaces protégés en demande 148 de plus. C'est
+hors de portée du plan gratuit de Streamlit Cloud. L'outil est conçu pour
+tourner **en local**, où les archives se téléchargent une fois et se réutilisent.
+Un déploiement n'aurait de sens qu'en limitant le périmètre aux référentiels
+d'espèces, ou en pré-construisant des référentiels réduits aux régions
+réellement couvertes.
+
 ## Limites connues
 
 - **La détection des nouvelles listes rouges régionales n'est pas

@@ -1,6 +1,2 @@
-# Dépendances système pour Streamlit Community Cloud.
-# tesseract-ocr : lecture des captures d'écran déposées comme source d'espèces.
-# Les paquets de langue sont séparés ; sans tesseract-ocr-fra, les accents
-# français sortent faux et l'appariement TaxRef échoue sur des noms corrects.
 tesseract-ocr
 tesseract-ocr-fra
