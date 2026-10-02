@@ -290,10 +290,21 @@ _ESPACES = re.compile(r"\s+")
 
 
 def nettoyer_texte(brut: str, limite: int = 900) -> str:
-    """Les textes de l'INPN arrivent en HTML : `<p>`, `<i>` autour des latins."""
-    texte = _BALISE.sub(" ", str(brut or ""))
-    texte = (texte.replace("&nbsp;", " ").replace("&amp;", "&")
-             .replace("&lt;", "<").replace("&gt;", ">").replace("&#39;", "'"))
+    """Les textes de l'INPN arrivent en HTML : balises et entités.
+
+    L'ordre compte. On décode les entités d'abord, on retire les balises
+    ensuite : l'inverse laisserait un `&lt;i&gt;` se transformer en `<i>` une
+    fois les balises déjà parties, et la balise ressortirait dans le livrable.
+
+    `html.unescape` plutôt qu'une liste de remplacements : la première version
+    traitait `&nbsp;`, `&amp;`, `&lt;`, `&gt;` et `&#39;` et laissait passer
+    tous les accents — « basse vall&eacute;e de la Theze ». 14 % des zonages
+    étaient touchés, dans 94 départements sur 96.
+    """
+    import html
+
+    texte = html.unescape(str(brut or ""))
+    texte = _BALISE.sub(" ", texte)
     texte = _ESPACES.sub(" ", texte).strip()
     if len(texte) <= limite:
         return texte

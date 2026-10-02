@@ -490,10 +490,12 @@ with onglet_a:
                 st.error(f"Construction impossible : {erreur}")
 
     st.caption(
-        "Comptez quelques minutes de calcul pour les 96 départements, puis le "
-        "temps que OneDrive téléverse les fichiers. À lancer quand le bouton "
-        "de vérification de version signale du neuf, pas plus souvent : les "
-        "référentiels INPN sortent une à deux fois par an."
+        "Comptez **environ trois quarts d'heure** pour les 96 départements — "
+        "mesuré, à deux départements par minute —, puis le temps que OneDrive "
+        "téléverse les quelque 650 Mo produits. C'est une opération qu'on "
+        "lance et qu'on laisse tourner, pas un clic entre deux réunions. "
+        "À faire quand le bouton de vérification de version signale du neuf, "
+        "pas plus souvent : les référentiels INPN sortent une à deux fois par an."
     )
 
 

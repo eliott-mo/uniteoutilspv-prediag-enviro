@@ -95,9 +95,12 @@ def construire(departements: list[str], archives_dir: Path, cache: Path,
                progression=None) -> EtatExtraits:
     """Produit un fichier par département depuis les archives nationales.
 
-    Les couches nationales ne sont chargées qu'une fois : c'est le poste le
-    plus coûteux, et le découpage lui-même prend moins d'une seconde par
-    département.
+    Compter environ trois quarts d'heure pour les 96 départements, soit deux
+    par minute. Le découpage géométrique n'y est pour presque rien : l'essentiel
+    du temps part dans le rattachement des textes descriptifs, qui est
+    justement ce qui rend l'extrait autonome. Une première estimation à quatre
+    minutes avait oublié ce poste, parce que le banc d'essai mesurait le
+    découpage seul.
     """
     def dire(message: str) -> None:
         if progression is not None:
