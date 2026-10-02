@@ -35,6 +35,7 @@ from prediag_enviro import rapport as mod_rapport  # noqa: E402
 from prediag_enviro import recoupement as mod_recoupement  # noqa: E402
 from prediag_enviro import referentiels  # noqa: E402
 from prediag_enviro import service, veille, vocabulaire  # noqa: E402
+from prediag_enviro import zonages as mod_zonages  # noqa: E402
 from prediag_enviro import sortie_word as mod_word  # noqa: E402
 from prediag_enviro.memoire import ACCEPTE, A_REVOIR, DECISIONS, REFUSE  # noqa: E402
 
@@ -516,8 +517,71 @@ with onglet_b:
                             st.session_state.get("rayon_rapprochee", 5000), step=500,
                             key="rayon_rapprochee")
 
+
         st.divider()
-        st.subheader("4 · Sources d'espèces")
+        st.subheader("4 · Zonages du patrimoine naturel")
+        st.caption(
+            "ZNIEFF, Natura 2000, espaces protégés et patrimoine géologique "
+            "présents dans les aires d'étude, avec leur distance à la ZIP et "
+            "leur intérêt. Rien à saisir : tout vient des référentiels INPN."
+        )
+
+        if st.button("Croiser les zonages", type="primary", width="stretch",
+                     key="btn_zonages"):
+            zone = st.empty()
+            try:
+                with st.spinner("Croisement…"):
+                    st.session_state.zonages = service.croiser_zonages(
+                        RACINE, emprise.union,
+                        aires=[
+                            mod_zonages.AireEtude("ZIP", "Zone d'implantation "
+                                                  "potentielle", 0.0),
+                            mod_zonages.AireEtude("AEI", "Aire d'étude immédiate",
+                                                  float(st.session_state.rayon_immediate)),
+                            mod_zonages.AireEtude("AER", "Aire d'étude rapprochée",
+                                                  float(st.session_state.rayon_rapprochee)),
+                        ],
+                        progression=lambda m: zone.info(m),
+                    )
+            except Exception as erreur:  # noqa: BLE001
+                st.error(f"Croisement impossible : {erreur}")
+            zone.empty()
+
+        resultat_zonages = st.session_state.get("zonages")
+        if resultat_zonages is not None:
+            st.info(resultat_zonages.resume())
+            for manquant in resultat_zonages.manquants:
+                st.warning(manquant)
+
+            for famille, titre in mod_zonages.FAMILLES:
+                trouves = resultat_zonages.par_famille(famille)
+                if not trouves:
+                    continue
+                st.markdown(f"**{titre}** — {len(trouves)}")
+                st.dataframe(
+                    pd.DataFrame([{
+                        "Nom": z.nom,
+                        "Distance à la ZIP": z.distance_lisible,
+                        "Type": z.type,
+                        "Identifiant": z.identifiant,
+                        "Aires": ", ".join(z.aires),
+                        "Intérêt": z.interet,
+                    } for z in trouves]),
+                    hide_index=True, width="stretch",
+                    column_config={
+                        "Intérêt": st.column_config.TextColumn(width="large"),
+                        "Nom": st.column_config.TextColumn(width="medium"),
+                    },
+                )
+            st.caption(
+                "Les noms sont rendus tels que les référentiels les portent, "
+                "capitales comprises : les passer en casse normale "
+                "décapitaliserait des noms propres — « fleuve la seine » — soit "
+                "une faute ajoutée par l'outil, plus discrète que la laideur "
+                "qu'elle remplace."
+            )
+        st.divider()
+        st.subheader("5 · Sources d'espèces")
         st.caption(
             "Déposez ce que vous avez relevé sur vos sources ; l'outil les "
             "recoupe, il ne va rien chercher à votre place. Exports Excel ou "
@@ -576,7 +640,7 @@ with onglet_b:
         resultat = st.session_state.get("recoupement")
         if resultat is not None:
             st.divider()
-            st.subheader("5 · Liste recoupée")
+            st.subheader("6 · Liste recoupée")
             st.caption(
                 "Vos sources fondues en une liste unique, dédoublonnée par "
                 "taxon. Les noms que TaxRef n'a pas reconnus sont isolés plus "
@@ -642,13 +706,22 @@ with onglet_b:
                         "Relancez le recoupement pour les voir prises en compte."
                     )
 
-            st.divider()
-            st.subheader("6 · Tableau Word")
-            st.caption(
-                "Le tableau d'espèces mis en forme, prêt à coller dans "
-                "l'étude — noms latins en italique, dates centrées."
-            )
+        st.divider()
+        st.subheader("7 · Documents Word")
+        st.caption(
+            "Les tableaux mis en forme aux conventions UNITe, prêts à coller "
+            "dans l'étude : en-têtes « Titre colonne », corps « Corps de texte "
+            "- Unite », noms latins en italique, dates centrées."
+        )
 
+        resultat_especes = st.session_state.get("recoupement")
+        resultat_zonages = st.session_state.get("zonages")
+        if resultat_zonages is None and resultat_especes is None:
+            st.caption(
+                "Rien à mettre en forme pour l'instant : croisez les zonages "
+                "(section 4) ou recoupez des sources d'espèces (section 5)."
+            )
+        else:
             col_mod, col_gen = st.columns([2, 1], gap="large")
             with col_mod:
                 modele = st.file_uploader(
@@ -660,41 +733,66 @@ with onglet_b:
             with col_gen:
                 st.write("")
                 generer = st.button("Générer le document", type="primary",
-                                    width="stretch", disabled=not resultat.especes)
+                                    width="stretch")
 
             if generer:
                 chemin_modele = _deposer(modele) if modele is not None else None
-                colonnes = mod_word.colonnes_especes([])
-                par_groupe: dict[str, list[dict]] = {}
-                for espece in resultat.especes:
-                    par_groupe.setdefault(espece.groupe, []).append({
-                        "nom_commun": espece.nom_commun,
-                        "nom_scientifique": espece.nom_scientifique,
-                        "nidification": espece.nidification,
-                        "date_obs": espece.date_obs,
-                    })
                 communes_libelle = (", ".join(c.nom for c in decoupage.retenues)
                                     or "la zone d'étude")
-                blocs = [
-                    (groupe.capitalize(), colonnes, lignes,
-                     f"Tableau : espèces de {groupe} recensées sur "
-                     f"{communes_libelle}")
-                    for groupe, lignes in par_groupe.items()
-                ]
-                sortie = _dossier_travail() / "tableaux_especes.docx"
+                blocs = []
+                mentions = []
+
+                # Les zonages d'abord : c'est l'ordre de l'état initial, et le
+                # contexte réglementaire se pose avant les espèces.
+                if resultat_zonages is not None:
+                    colonnes_z = mod_word.colonnes_zonages()
+                    for famille, titre in mod_zonages.FAMILLES:
+                        trouves = resultat_zonages.par_famille(famille)
+                        if not trouves:
+                            continue
+                        blocs.append((titre, colonnes_z, [{
+                            "nom": z.nom,
+                            "distance": z.distance_lisible,
+                            "identifiant": z.identifiant,
+                            "interet": z.interet,
+                            "aires": ", ".join(z.aires),
+                        } for z in trouves],
+                            f"Tableau : {titre.lower()} dans les aires d'étude"))
+                    _, citations_z = service.preparer_zonages(RACINE)
+                    mentions += ["Zonages : " + " · ".join(citations_z)]
+
+                if resultat_especes is not None and resultat_especes.especes:
+                    colonnes_e = mod_word.colonnes_especes([])
+                    par_groupe: dict[str, list[dict]] = {}
+                    for espece in resultat_especes.especes:
+                        par_groupe.setdefault(espece.groupe, []).append({
+                            "nom_commun": espece.nom_commun,
+                            "nom_scientifique": espece.nom_scientifique,
+                            "nidification": espece.nidification,
+                            "date_obs": espece.date_obs,
+                        })
+                    blocs += [
+                        (groupe.capitalize(), colonnes_e, lignes,
+                         f"Tableau : espèces de {groupe} recensées sur "
+                         f"{communes_libelle}")
+                        for groupe, lignes in par_groupe.items()
+                    ]
+                    mentions += [
+                        "Sources d'espèces : " + ", ".join(sorted({
+                            s for e in resultat_especes.especes for s in e.sources})),
+                        "Statuts et taxonomie : " + " · ".join(_contexte().citations),
+                    ]
+
+                sortie = _dossier_travail() / "etat_initial.docx"
                 _, recrees = mod_word.ecrire_document(
                     sortie, f"État initial — {communes_libelle}", blocs,
-                    modele=chemin_modele,
-                    mentions=[
-                        "Sources : " + ", ".join(sorted({
-                            s for e in resultat.especes for s in e.sources})),
-                        "Statuts et taxonomie : " + " · ".join(_contexte().citations),
-                    ],
+                    modele=chemin_modele, mentions=mentions,
                 )
                 if recrees:
                     st.warning(
                         "Styles absents du modèle, recréés à l'approchant : "
                         + ", ".join(recrees)
+                        + ". Déposez un document UNITe pour une mise en forme fidèle."
                     )
                 st.download_button(
                     "⬇️ Télécharger les tableaux", sortie.read_bytes(),
@@ -703,7 +801,6 @@ with onglet_b:
                          ".wordprocessingml.document",
                 )
                 st.caption(
-                    "Tableaux aux conventions UNITe : en-têtes « Titre colonne », "
-                    "corps « Corps de texte - Unite », noms latins en italique, "
-                    "dates centrées. Plus de copier-coller ni de remise en forme."
+                    f"{len(blocs)} tableau(x). Les sources et leurs dates sont "
+                    "reportées en pied de document — la Licence Ouverte l'exige."
                 )

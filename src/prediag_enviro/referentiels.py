@@ -25,7 +25,14 @@ _UA = {"User-Agent": "Mozilla/5.0 (prediag-enviro ; UNITe)"}
 _TENTATIVES = 8
 
 #: Nom lisible de chaque référentiel, pour tout ce qui s'affiche.
-NOMS_AFFICHES = {"taxref": "TaxRef", "bdc_statuts": "BDC-Statuts"}
+NOMS_AFFICHES = {
+    "taxref": "TaxRef",
+    "bdc_statuts": "BDC-Statuts",
+    "znieff": "ZNIEFF",
+    "natura2000": "Natura 2000",
+    "espaces_proteges": "Espaces protégés",
+    "patrimoine_geologique": "Inventaire du patrimoine géologique",
+}
 
 
 @dataclass
@@ -135,7 +142,8 @@ def _ecrire_manifeste(dossier: Path, refs: dict[str, Referentiel]) -> None:
     )
 
 
-def assurer(cfg: dict, dossier: Path, forcer: bool = False) -> dict[str, Referentiel]:
+def assurer(cfg: dict, dossier: Path, forcer: bool = False,
+            cles: tuple[str, ...] | None = None) -> dict[str, Referentiel]:
     """Garantit la présence locale des référentiels déclarés dans sources.yml.
 
     Ne retélécharge pas ce qui est déjà là. `forcer=True` **supprime d'abord**
@@ -150,9 +158,14 @@ def assurer(cfg: dict, dossier: Path, forcer: bool = False) -> dict[str, Referen
     """
     dossier.mkdir(parents=True, exist_ok=True)
     deja = lire_manifeste(dossier)
-    refs: dict[str, Referentiel] = {}
+    refs: dict[str, Referentiel] = dict(deja) if cles else {}
 
     for cle, spec in cfg["referentiels"].items():
+        # `cles` restreint le périmètre : la veille n'a que faire des 460 Mo
+        # de zonages, et le prédiag n'a pas à les attendre tant qu'on reste
+        # dans l'onglet des tables.
+        if cles is not None and cle not in cles:
+            continue
         dest = dossier / spec["fichier"]
         connu = deja.get(cle)
         if forcer and dest.exists():
@@ -167,10 +180,18 @@ def assurer(cfg: dict, dossier: Path, forcer: bool = False) -> dict[str, Referen
                                     recupere_le=connu.recupere_le, url=spec["url"])
             continue
 
-        print(f"  téléchargement {cle} v{spec['version']} …", flush=True)
-        telecharger(spec["url"], dest)
+        # Le fichier peut être là sans figurer au manifeste — première
+        # utilisation d'un référentiel récupéré par ailleurs. Annoncer un
+        # téléchargement qui n'aura pas lieu est le même mensonge que celui du
+        # bouton « Rafraîchir » : on vérifie avant de parler.
+        attendu = _taille_distante(spec["url"])
+        deja_complet = dest.exists() and attendu and dest.stat().st_size >= attendu
+        if not deja_complet:
+            print(f"  téléchargement {cle} v{spec['version']} …", flush=True)
+        telecharger(spec["url"], dest, attendu=attendu)
         taille = dest.stat().st_size / 1048576
-        print(f"    {dest.name} — {taille:.1f} Mo")
+        if not deja_complet:
+            print(f"    {dest.name} — {taille:.1f} Mo")
         refs[cle] = Referentiel(cle=cle, version=spec["version"], chemin=dest,
                                 recupere_le=date.today().isoformat(), url=spec["url"])
 

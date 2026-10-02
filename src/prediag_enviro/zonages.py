@@ -34,6 +34,13 @@ CRS_METRIQUE = 2154
 #: Aires d'étude par défaut, d'après le guide du ministère (2016) que cite le
 #: document de référence. Les rayons restent modifiables : ils dépendent du
 #: projet et des groupes d'espèces concernés.
+#: Familles de zonages, dans l'ordre des tableaux 8 à 10 de l'état initial.
+FAMILLES = [
+    ("inventaire", "Zonages d'inventaire — ZNIEFF"),
+    ("natura2000", "Natura 2000 — ZPS et ZSC"),
+    ("autres", "Autres zonages du patrimoine naturel"),
+]
+
 AIRES_DEFAUT = [
     ("ZIP", "Zone d'implantation potentielle", 0.0),
     ("AEI", "Aire d'étude immédiate", 200.0),

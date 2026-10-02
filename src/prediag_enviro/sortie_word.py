@@ -139,6 +139,17 @@ def colonnes_especes(statuts: list[str]) -> list[Colonne]:
     return base + [Colonne(s, f"statut::{s}", centree=True) for s in statuts]
 
 
+def colonnes_zonages() -> list[Colonne]:
+    """Colonnes des tableaux 8 à 10, dans l'ordre du document de référence."""
+    return [
+        Colonne("Nom", "nom"),
+        Colonne("Distance à la ZIP", "distance", centree=True),
+        Colonne("Identifiant", "identifiant", centree=True),
+        Colonne("Intérêt", "interet"),
+        Colonne("Aire(s) d'étude concernée(s)", "aires", centree=True),
+    ]
+
+
 def ecrire_document(chemin: Path, titre: str, blocs: list[tuple[str, list[Colonne],
                                                                 list[dict], str]],
                     modele: Path | None = None,

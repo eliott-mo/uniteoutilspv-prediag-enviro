@@ -16,7 +16,7 @@ from pathlib import Path
 
 import yaml
 
-from . import bdc, classeurs, referentiels, taxref, veille
+from . import bdc, classeurs, referentiels, taxref, veille, zonages
 from .memoire import Memoire
 
 #: Motifs de reconnaissance des classeurs déposés, par groupe.
@@ -65,7 +65,8 @@ def charger_contexte(racine: Path, forcer: bool = False,
     dossier = racine / "referentiels"
 
     dire("Récupération des référentiels INPN…")
-    refs = referentiels.assurer(cfg, dossier, forcer=forcer)
+    refs = referentiels.assurer(cfg, dossier, forcer=forcer,
+                                cles=("taxref", "bdc_statuts"))
     citations = referentiels.bandeau_versions(refs, cfg["attribution"])
 
     spec_tax = cfg["referentiels"]["taxref"]
@@ -128,3 +129,32 @@ def territoires_disponibles(cs: dict[str, classeurs.Classeur],
     # Tri sur la forme sans accents, sinon « Île-de-France » tombe après
     # « Rhône-Alpes » et on la cherche.
     return sorted(trouves, key=classeurs._cle_territoire)
+
+
+#: Référentiels nécessaires aux seuls zonages — 460 Mo, téléchargés à la
+#: première utilisation de la section et pas avant.
+CLES_ZONAGES = ("znieff", "natura2000", "espaces_proteges", "patrimoine_geologique")
+
+
+def preparer_zonages(racine: Path, progression=None) -> tuple[dict[str, str], list[str]]:
+    """Garantit les archives de zonages. Renvoie (fichiers, citations)."""
+    cfg = lire_config(racine)
+    if progression is not None:
+        progression("Récupération des référentiels de zonages (460 Mo la première "
+                    "fois)…")
+    refs = referentiels.assurer(cfg, racine / "referentiels", cles=CLES_ZONAGES)
+    fichiers = {c: spec["fichier"] for c, spec in cfg["referentiels"].items()}
+    citations = [refs[c].citation(cfg["attribution"]) for c in CLES_ZONAGES if c in refs]
+    return fichiers, citations
+
+
+def croiser_zonages(racine: Path, emprise_union, aires=None,
+                    progression=None) -> zonages.Resultat:
+    """Croise l'emprise avec les zonages du patrimoine naturel."""
+    fichiers, _ = preparer_zonages(racine, progression)
+    if progression is not None:
+        progression("Croisement avec les zonages…")
+    return zonages.croiser(
+        emprise_union, zonages.registre(), racine / "referentiels",
+        racine / "referentiels" / "_cache_sig", fichiers, aires=aires,
+    )
