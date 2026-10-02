@@ -357,9 +357,27 @@ def _enrichir_znieff(gdf, chemin: Path):
         if numero and nom:
             especes[numero][groupe].add(nom)
 
+    def _sans_repetition(texte: str, nom: str) -> str:
+        """Retire la redite du nom en tête de description.
+
+        Les fiches lorraines se contentent souvent de reprendre le nom suivi
+        d'un comptage — « FORÊT D'ARGONNE AU NORD DE L'A4 (1 espèce
+        confidentielle et 56 espèces déterminantes) ». Le nom figure déjà dans
+        la colonne d'à côté du tableau : le répéter occupe une place qui
+        manque au reste.
+        """
+        if not texte or not nom:
+            return texte
+        if normaliser(texte).startswith(normaliser(nom)):
+            reste = texte[len(nom):].lstrip(" :–—-")
+            # On ne garde le raccourci que s'il reste quelque chose à lire.
+            return reste if len(reste) > 20 else texte
+        return texte
+
     def _texte(numero: str) -> str:
         fiche = fiches.get(numero) or {}
-        bouts = [nettoyer_texte(fiche.get("TX_GENE") or fiche.get("TX_INTERET") or "")]
+        brut = nettoyer_texte(fiche.get("TX_GENE") or fiche.get("TX_INTERET") or "")
+        bouts = [_sans_repetition(brut, str(fiche.get("LB_ZN") or "").strip())]
         groupes = especes.get(numero)
         if groupes:
             details = []
