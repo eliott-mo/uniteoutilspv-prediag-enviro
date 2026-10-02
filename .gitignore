@@ -37,3 +37,6 @@ memoire/*.json
 # autant à chaque nouvelle version INPN — l'historique git n'est pas leur place.
 extraits/*
 !extraits/.gitkeep
+
+# Destination de publication : locale au poste de developpement
+.destination-publication

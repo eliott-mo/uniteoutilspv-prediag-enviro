@@ -35,6 +35,12 @@ except Exception:  # noqa: BLE001
 
 RACINE = Path(__file__).resolve().parent
 
+#: Dernier dossier de production utilisé. Fichier local au poste de
+#: développement, hors dépôt : le chemin dépend de la machine, et le retaper
+#: à chaque publication est le genre de friction qui finit par faire publier
+#: au mauvais endroit.
+MEMO = RACINE / ".destination-publication"
+
 #: Ce qui part en production. Tout le reste est soit du développement, soit
 #: des données qui appartiennent à la production.
 CODE = [
@@ -55,6 +61,40 @@ DONNEES = ["classeurs", "extraits"]
 
 #: Jamais publié : dépôt git, caches, environnements, fichiers de travail.
 EXCLUS = {".git", "__pycache__", ".venv", "venv", ".pytest_cache", ".claude"}
+
+
+def destination_memorisee() -> Path | None:
+    if not MEMO.exists():
+        return None
+    texte = MEMO.read_text(encoding="utf-8").strip()
+    return Path(texte) if texte else None
+
+
+def memoriser(destination: Path) -> None:
+    MEMO.write_text(str(destination), encoding="utf-8")
+
+
+def _fichiers_oublies() -> list[str]:
+    """Fichiers de la racine qu'aucune liste ne mentionne.
+
+    Le piège de long terme : les listes sont écrites à la main. `src/` est
+    publié en entier, donc un nouveau module suit tout seul — mais un nouveau
+    fichier à la racine serait oublié en silence, et l'outil en production
+    tournerait sans lui. On préfère un avertissement à chaque publication.
+    """
+    connus = set(CODE) | set(DONNEES) | EXCLUS | {
+        MEMO.name, ".gitignore", ".gitattributes", "directes.txt",
+        "VERSION.txt", "LISEZ-MOI.txt",
+    }
+    oublies = []
+    for element in sorted(RACINE.iterdir()):
+        if element.name in connus or element.name.startswith("."):
+            continue
+        if element.is_dir() and element.name in ("sorties", "memoire",
+                                                 "referentiels"):
+            continue
+        oublies.append(element.name + ("/" if element.is_dir() else ""))
+    return oublies
 
 
 def _ignorer(_dossier, noms):
@@ -160,10 +200,22 @@ def publier(vers: Path, avec_donnees: bool = False, essai: bool = False) -> None
         if essai:
             copies += 1
             continue
-        if source.is_dir():
-            shutil.copytree(source, cible, dirs_exist_ok=True, ignore=_ignorer)
-        else:
-            shutil.copy2(source, cible)
+        try:
+            if source.is_dir():
+                shutil.copytree(source, cible, dirs_exist_ok=True,
+                                ignore=_ignorer)
+            else:
+                shutil.copy2(source, cible)
+        except PermissionError:
+            # Cas courant : l'outil tourne en production et verrouille un
+            # fichier. Une publication à moitié faite ne démarrerait pas, donc
+            # on s'arrête net plutôt que de continuer.
+            print(f"\n  ✗ {nom} est verrouillé en production.")
+            print("    L'outil y est probablement ouvert : fermer la fenêtre "
+                  "noire sur le poste concerné, puis relancer la publication.")
+            print("    Publication interrompue — la production est dans un "
+                  "état mixte, à ne pas laisser ainsi.\n")
+            raise SystemExit(1)
         copies += 1
 
     for nom in DONNEES:
@@ -189,6 +241,7 @@ def publier(vers: Path, avec_donnees: bool = False, essai: bool = False) -> None
     if not essai:
         (vers / "VERSION.txt").write_text(_version(), encoding="utf-8")
         (vers / "LISEZ-MOI.txt").write_text(LISEZ_MOI, encoding="utf-8")
+        memoriser(vers)
     print(f"\n  {copies} élément(s) de code"
           f"{' seraient publiés' if essai else ' publiés'}.")
     if not essai:
@@ -199,8 +252,9 @@ def publier(vers: Path, avec_donnees: bool = False, essai: bool = False) -> None
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Publier l'outil en production")
-    ap.add_argument("--vers", required=True, type=Path,
-                    help="dossier de production")
+    ap.add_argument("--vers", type=Path,
+                    help="dossier de production ; mémorisé après la première "
+                         "publication, donc facultatif ensuite")
     ap.add_argument("--avec-donnees", action="store_true",
                     help="copier aussi classeurs/ et extraits/ — première mise "
                          "en place seulement, jamais par-dessus des données "
@@ -208,7 +262,26 @@ def main() -> int:
     ap.add_argument("--essai", action="store_true",
                     help="afficher ce qui serait fait, sans rien écrire")
     args = ap.parse_args()
-    publier(args.vers, avec_donnees=args.avec_donnees, essai=args.essai)
+
+    destination = args.vers or destination_memorisee()
+    if destination is None:
+        print("\n  Aucune destination. Indiquez-la une fois avec --vers :\n"
+              '    python publier.py --vers "<dossier Outils>" --avec-donnees\n'
+              "  Elle sera mémorisée pour les publications suivantes.\n")
+        return 1
+    if args.vers is None:
+        print(f"  Destination mémorisée : {destination}")
+
+    oublies = _fichiers_oublies()
+    if oublies:
+        print("\n  ⚠ Fichiers présents dans le dossier de travail mais dans "
+              "aucune liste de publication :")
+        for nom in oublies:
+            print(f"      {nom}")
+        print("    S'ils doivent partir en production, les ajouter à CODE "
+              "dans publier.py.\n")
+
+    publier(destination, avec_donnees=args.avec_donnees, essai=args.essai)
     return 0
 
 
