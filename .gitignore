@@ -13,9 +13,13 @@ referentiels/*
 classeurs/*.xlsx
 classeurs/*.xls
 
-# Sorties
-sorties/*.xlsx
-sorties/*.csv
+# Sorties : rapports, documents, cartes. Le dossier entier, pas une liste
+# d'extensions — c'est en listant *.xlsx et *.csv qu'on a laissé partir 4,4 Mo
+# de cartes PNG dans le dépôt, après avoir déjà laissé passer 380 Mo de
+# shapefiles en ne listant que *.zip côté référentiels. Deux fois la même
+# erreur : un livrable produit n'a jamais sa place sous suivi de version.
+sorties/*
+!sorties/.gitkeep
 
 # Mémoire de l'outil (décisions, alias) — locale par défaut
 memoire/*.json
