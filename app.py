@@ -36,6 +36,7 @@ from prediag_enviro import recoupement as mod_recoupement  # noqa: E402
 from prediag_enviro import referentiels  # noqa: E402
 from prediag_enviro import service, veille, vocabulaire  # noqa: E402
 from prediag_enviro import zonages as mod_zonages  # noqa: E402
+from prediag_enviro import cartes as mod_cartes  # noqa: E402
 from prediag_enviro import sortie_word as mod_word  # noqa: E402
 from prediag_enviro.memoire import ACCEPTE, A_REVOIR, DECISIONS, REFUSE  # noqa: E402
 
@@ -114,6 +115,17 @@ def _memoire():
     if "memoire" not in st.session_state:
         st.session_state.memoire = service.memoire_projet(RACINE)
     return st.session_state.memoire
+
+
+def _aires_etude() -> list:
+    """Les trois aires, telles que les sections 3 et 4 les emploient."""
+    return [
+        mod_zonages.AireEtude("ZIP", "Zone d'implantation potentielle", 0.0),
+        mod_zonages.AireEtude("AEI", "Aire d'étude immédiate",
+                              float(st.session_state.get("rayon_immediate", 200))),
+        mod_zonages.AireEtude("AER", "Aire d'étude rapprochée",
+                              float(st.session_state.get("rayon_rapprochee", 5000))),
+    ]
 
 
 def _dossier_travail() -> Path:
@@ -533,14 +545,7 @@ with onglet_b:
                 with st.spinner("Croisement…"):
                     st.session_state.zonages = service.croiser_zonages(
                         RACINE, emprise.union,
-                        aires=[
-                            mod_zonages.AireEtude("ZIP", "Zone d'implantation "
-                                                  "potentielle", 0.0),
-                            mod_zonages.AireEtude("AEI", "Aire d'étude immédiate",
-                                                  float(st.session_state.rayon_immediate)),
-                            mod_zonages.AireEtude("AER", "Aire d'étude rapprochée",
-                                                  float(st.session_state.rayon_rapprochee)),
-                        ],
+                        aires=_aires_etude(),
                         progression=lambda m: zone.info(m),
                     )
             except Exception as erreur:  # noqa: BLE001
@@ -580,6 +585,36 @@ with onglet_b:
                 "une faute ajoutée par l'outil, plus discrète que la laideur "
                 "qu'elle remplace."
             )
+
+            st.markdown("**Cartes**")
+            st.caption(
+                "Une carte par famille, A4 paysage, cadrée sur l'aire d'étude "
+                "rapprochée — une seule carte pour les trois familles donnerait "
+                "un empilement illisible dès qu'elles se recouvrent, ce qui est "
+                "le cas général en vallée alluviale."
+            )
+            if st.button("Produire les cartes", width="stretch", key="btn_cartes"):
+                with st.spinner("Rendu des cartes…"):
+                    try:
+                        st.session_state.cartes = mod_cartes.produire(
+                            resultat_zonages, emprise.gdf,
+                            _aires_etude(), _dossier_travail() / "cartes",
+                            ", ".join(c.nom for c in decoupage.retenues)
+                            or "Zone d'étude",
+                        )
+                    except Exception as erreur:  # noqa: BLE001
+                        st.error(f"Rendu impossible : {erreur}")
+
+            produites = st.session_state.get("cartes") or []
+            for carte in produites:
+                st.image(str(carte.chemin), caption=f"{carte.titre} — "
+                         f"{carte.nb_zonages} zonage(s)", width="stretch")
+            if produites:
+                st.caption(
+                    "Fond Plan IGN (Géoplateforme). Le serveur de tuiles public "
+                    "d'OpenStreetMap refuse l'usage automatisé : sa politique "
+                    "l'interdit, et on ne la contourne pas."
+                )
         st.divider()
         st.subheader("5 · Sources d'espèces")
         st.caption(
@@ -746,10 +781,15 @@ with onglet_b:
                 # contexte réglementaire se pose avant les espèces.
                 if resultat_zonages is not None:
                     colonnes_z = mod_word.colonnes_zonages()
+                    # Chaque carte suit le tableau qu'elle illustre, comme dans
+                    # le document de référence.
+                    par_famille_carte = {c.famille: c
+                                         for c in (st.session_state.get("cartes") or [])}
                     for famille, titre in mod_zonages.FAMILLES:
                         trouves = resultat_zonages.par_famille(famille)
                         if not trouves:
                             continue
+                        carte = par_famille_carte.get(famille)
                         blocs.append((titre, colonnes_z, [{
                             "nom": z.nom,
                             "distance": z.distance_lisible,
@@ -757,9 +797,19 @@ with onglet_b:
                             "interet": z.interet,
                             "aires": ", ".join(z.aires),
                         } for z in trouves],
-                            f"Tableau : {titre.lower()} dans les aires d'étude"))
+                            f"Tableau : {titre.lower()} dans les aires d'étude",
+                            carte.chemin if carte else None,
+                            f"Carte : {titre.lower()} autour de la ZIP" if carte else ""))
                     _, citations_z = service.preparer_zonages(RACINE)
                     mentions += ["Zonages : " + " · ".join(citations_z)]
+                    if not par_famille_carte:
+                        st.info(
+                            "Document produit sans les cartes : revenez en "
+                            "section 4 et cliquez « Produire les cartes »."
+                        )
+                    else:
+                        mentions += ["Fond de carte : "
+                                     + mod_cartes.FOND["attribution"]]
 
                 if resultat_especes is not None and resultat_especes.especes:
                     colonnes_e = mod_word.colonnes_especes([])

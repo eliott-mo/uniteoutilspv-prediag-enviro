@@ -31,7 +31,7 @@ from pathlib import Path
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt
+from docx.shared import Cm, Pt
 
 STYLE_ENTETE = "Titre colonne"
 STYLE_CORPS = "Corps de texte - Unite"
@@ -150,11 +150,34 @@ def colonnes_zonages() -> list[Colonne]:
     ]
 
 
-def ecrire_document(chemin: Path, titre: str, blocs: list[tuple[str, list[Colonne],
-                                                                list[dict], str]],
+def ajouter_image(document: Document, chemin: Path, legende: str = "",
+                  largeur_cm: float = 16.0) -> None:
+    """Insère une carte, centrée, avec sa légende au style du document.
+
+    Largeur par défaut : 16 cm, soit la justification d'une page A4 portrait
+    avec les marges usuelles. Les cartes étant produites en A4 paysage, elles
+    occupent ainsi la largeur du texte sans déborder.
+    """
+    paragraphe = document.add_paragraph()
+    paragraphe.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraphe.add_run().add_picture(str(chemin), width=Cm(largeur_cm))
+    if legende:
+        bas = document.add_paragraph(legende)
+        bas.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        try:
+            bas.style = STYLE_LEGENDE
+        except KeyError:
+            pass
+
+
+def ecrire_document(chemin: Path, titre: str, blocs: list[tuple],
                     modele: Path | None = None,
                     mentions: list[str] | None = None) -> tuple[Path, list[str]]:
-    """Produit le document. `blocs` = (intertitre, colonnes, lignes, légende).
+    """Produit le document.
+
+    `blocs` = (intertitre, colonnes, lignes, légende[, image, légende_image]).
+    L'image suit son tableau, comme dans le document de référence où chaque
+    carte vient après le tableau qu'elle illustre.
 
     Renvoie (chemin, styles recréés) — si des styles ont dû être recréés, c'est
     que le modèle n'en portait pas : la mise en forme sera approchante et il
@@ -167,13 +190,18 @@ def ecrire_document(chemin: Path, titre: str, blocs: list[tuple[str, list[Colonn
     recrees = _assurer_styles(document)
 
     document.add_heading(titre, level=1)
-    for intertitre, colonnes, lignes, legende in blocs:
+    for bloc in blocs:
+        intertitre, colonnes, lignes, legende = bloc[:4]
+        image = bloc[4] if len(bloc) > 4 else None
+        legende_image = bloc[5] if len(bloc) > 5 else ""
         if intertitre:
             document.add_heading(intertitre, level=2)
-        if not lignes:
-            document.add_paragraph("Aucune espèce retenue pour ce groupe.")
-            continue
-        ecrire_tableau(document, colonnes, lignes, legende)
+        if lignes:
+            ecrire_tableau(document, colonnes, lignes, legende)
+        else:
+            document.add_paragraph("Aucune entrée retenue pour cette rubrique.")
+        if image is not None and Path(image).exists():
+            ajouter_image(document, Path(image), legende_image)
 
     if mentions:
         document.add_paragraph()

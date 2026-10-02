@@ -288,6 +288,31 @@ def _remplir_bandeau(ax, lignes_titre, poignees, source):
 
 # ──────────────────────────────────────────────────────── tracé ──
 
+def _poser_fond(ax, tentatives: int = 3) -> bool:
+    """Pose le fond de plan, avec reprises.
+
+    Une seule tuile en échec fait abandonner contextily, et la carte sort avec
+    un aplat blanc. C'est arrivé en production sur un 404 transitoire : la même
+    tuile répondait correctement la minute suivante. Trois tentatives espacées
+    suffisent à absorber un creux de réseau ; au-delà, l'échec est signalé sur
+    la carte elle-même.
+    """
+    import time
+
+    for tentative in range(tentatives):
+        try:
+            cx.add_basemap(ax, source=FOND["url"], crs=f"EPSG:{CRS_AFFICHAGE}",
+                           attribution_size=5)
+            return True
+        except Exception as erreur:  # noqa: BLE001
+            if tentative == tentatives - 1:
+                print(f"    [fond] indisponible apres {tentatives} tentatives :"
+                      f" {erreur}")
+                return False
+            time.sleep(2 * (tentative + 1))
+    return False
+
+
 def _cadre(emprise_union, rayon_m: float, marge: float = 0.08):
     """Rectangle de cadrage, carré autour de l'emprise élargie de l'AER."""
     x0, y0, x1, y1 = emprise_union.buffer(rayon_m).bounds
@@ -370,11 +395,7 @@ def dessiner_famille(famille: str, titre: str, couches: dict, emprise_gdf,
     ax.set_ylim(y0, y1)
     ax.apply_aspect()
 
-    try:
-        cx.add_basemap(ax, source=FOND["url"], crs=f"EPSG:{CRS_AFFICHAGE}",
-                       attribution_size=5)
-    except Exception as erreur:  # noqa: BLE001
-        print(f"    [fond] indisponible : {erreur}")
+    fond_pose = _poser_fond(ax)
 
     poignees_z, etiquettes = _dessiner_zonages(ax, couches, cadre_l93)
     poignees_a = _dessiner_aires(ax, emprise_union, aires)
@@ -389,11 +410,15 @@ def dessiner_famille(famille: str, titre: str, couches: dict, emprise_gdf,
     poignees = [Patch(facecolor=COULEUR_EMPRISE, edgecolor=COULEUR_EMPRISE,
                       alpha=0.45, label="Emprise du projet (ZIP)")]
     poignees += poignees_a + poignees_z
-    _remplir_bandeau(
-        ax_bandeau,
-        [(titre, 12, "bold"), (nom_projet, 9, "normal")],
-        poignees, source,
-    )
+    lignes_titre = [(titre, 12, "bold"), (nom_projet, 9, "normal")]
+    if not fond_pose:
+        # Une carte sans fond doit le dire. Sinon elle part dans le livrable
+        # avec un aplat blanc, et personne ne sait si c'est voulu.
+        lignes_titre.append(
+            ("⚠ Fond de plan indisponible au moment du rendu — relancer la "
+             "production des cartes", 7.5, "normal")
+        )
+    _remplir_bandeau(ax_bandeau, lignes_titre, poignees, source)
 
     ax.set_axis_off()
     chemin.parent.mkdir(parents=True, exist_ok=True)
