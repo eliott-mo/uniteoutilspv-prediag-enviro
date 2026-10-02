@@ -28,6 +28,7 @@ sys.path.insert(0, str(RACINE / "src"))
 
 from prediag_enviro import bdc, classeurs, rapport, referentiels, taxref, veille  # noqa: E402
 from prediag_enviro.memoire import Memoire  # noqa: E402
+from prediag_enviro import chemins, service  # noqa: E402
 
 MOTIFS = {
     "oiseaux": "*oiseaux*.xlsx",
@@ -51,7 +52,8 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = yaml.safe_load((RACINE / "config" / "sources.yml").read_text(encoding="utf-8"))
-    memoire = Memoire(RACINE / "memoire" / "arbitrages.json")
+    service.emplacements(RACINE)
+    memoire = Memoire(chemins.memoire() / "arbitrages.json")
 
     if args.relire:
         retenus = rapport.relire_decisions(args.relire, memoire)
@@ -61,12 +63,14 @@ def main() -> int:
     print("\n=== Veille des classeurs B-Statuts ===\n")
 
     print("Référentiels")
-    refs = referentiels.assurer(cfg, RACINE / "referentiels", forcer=args.maj_referentiels)
+    refs = referentiels.assurer(cfg, chemins.referentiels(),
+                                forcer=args.maj_referentiels,
+                                cles=("taxref", "bdc_statuts"))
     citations = referentiels.bandeau_versions(refs, cfg["attribution"])
     for c in citations:
         print(f"  {c}")
 
-    cache = RACINE / "referentiels"
+    cache = chemins.referentiels()
     spec_tax = cfg["referentiels"]["taxref"]
     idx = taxref.Index.charger(refs["taxref"].chemin, spec_tax["membres"],
                                spec_tax["version"], cache / "taxref_index.pkl")
@@ -78,7 +82,7 @@ def main() -> int:
           .replace(",", " "))
 
     print("\nClasseurs")
-    dossier = RACINE / "classeurs"
+    dossier = chemins.classeurs()
     cs = classeurs.lire_tous(dossier, MOTIFS)
     if not cs:
         print(f"  aucun classeur dans {dossier}/ — y déposer les fichiers B-Statuts")
@@ -107,7 +111,7 @@ def main() -> int:
         "groupes : " + ", ".join(args.groupes) if args.groupes else "",
         "territoires : " + ", ".join(args.territoires) if args.territoires else "",
     ]))
-    sortie = args.sortie or (RACINE / "sorties" /
+    sortie = args.sortie or (chemins.sorties() /
                              f"veille_{date.today().isoformat()}.xlsx")
     rapport.ecrire(res, sortie, citations, memoire, filtres)
     print(f"\n-> {sortie}")

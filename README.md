@@ -212,16 +212,41 @@ Deux règles font l'essentiel de la fiabilité :
 
 ---
 
-## Organisation
+## Où vont les fichiers
+
+Le départage n'est pas affaire de goût : OneDrive synchronise ce qu'il voit.
+
+**Dans le dossier de l'application** — ce qui se partage et change rarement :
 
 ```
 app.py                    l'interface, deux onglets
+Lancer le prediag.bat     le lanceur Windows
 run_veille.py             la veille en ligne de commande
 config/sources.yml        référentiels épinglés (URL, version)
-classeurs/                les six classeurs B-Statuts          (hors dépôt)
-referentiels/             archives INPN + index en cache       (hors dépôt)
-memoire/arbitrages.json   décisions rendues, alias appris      (hors dépôt)
-sorties/                  rapports produits                    (hors dépôt)
+classeurs/                les six classeurs B-Statuts, maître unique
+extraits/                 zonages par département, ~650 Mo pour la France
+```
+
+**Sur la machine** (`%LOCALAPPDATA%\prediag-enviro`) — ce qui est lourd, dérivé
+ou écrit pendant l'exécution :
+
+```
+venv/                     l'environnement Python (~300 Mo)
+referentiels/             archives INPN + index (jusqu'à 1 Go)
+memoire/arbitrages.json   décisions rendues, alias appris
+sorties/                  rapports et documents produits
+```
+
+Les archives nationales ne servent qu'à **construire** les extraits : seul le
+poste qui tient les référentiels à jour les porte. Un chef de projet n'a que
+les quelques mégaoctets de son département.
+
+`PREDIAG_ENVIRO_DONNEES` déplace le dossier local, par exemple vers un disque
+plus grand. L'outil avertit s'il se retrouve sous OneDrive — un gigaoctet
+synchronisé pour chaque personne, et des copies de conflit sur les fichiers
+écrits en cours d'exécution.
+
+```
 
 src/prediag_enviro/
     referentiels.py   téléchargement avec reprise, épinglage des versions

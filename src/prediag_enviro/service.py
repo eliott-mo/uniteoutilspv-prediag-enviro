@@ -16,7 +16,7 @@ from pathlib import Path
 
 import yaml
 
-from . import bdc, classeurs, extraits, referentiels, taxref, veille, zonages
+from . import bdc, chemins, classeurs, extraits, referentiels, taxref, veille, zonages
 from .memoire import Memoire
 
 #: Motifs de reconnaissance des classeurs déposés, par groupe.
@@ -62,7 +62,7 @@ def charger_contexte(racine: Path, forcer: bool = False,
             progression(message)
 
     cfg = lire_config(racine)
-    dossier = racine / "referentiels"
+    dossier = chemins.referentiels()
 
     dire("Récupération des référentiels INPN…")
     refs = referentiels.assurer(cfg, dossier, forcer=forcer,
@@ -85,7 +85,7 @@ def charger_contexte(racine: Path, forcer: bool = False,
 
 
 def charger_classeurs(racine: Path) -> dict[str, classeurs.Classeur]:
-    return classeurs.lire_tous(racine / "classeurs", MOTIFS)
+    return classeurs.lire_tous(chemins.classeurs(), MOTIFS)
 
 
 def lancer_veille(contexte: Contexte, cs: dict[str, classeurs.Classeur],
@@ -104,7 +104,7 @@ def lancer_veille(contexte: Contexte, cs: dict[str, classeurs.Classeur],
 
 
 def memoire_projet(racine: Path) -> Memoire:
-    return Memoire(racine / "memoire" / "arbitrages.json")
+    return Memoire(chemins.memoire() / "arbitrages.json")
 
 
 def territoires_disponibles(cs: dict[str, classeurs.Classeur],
@@ -142,7 +142,7 @@ def preparer_zonages(racine: Path, progression=None) -> tuple[dict[str, str], li
     if progression is not None:
         progression("Récupération des référentiels de zonages (460 Mo la première "
                     "fois)…")
-    refs = referentiels.assurer(cfg, racine / "referentiels", cles=CLES_ZONAGES)
+    refs = referentiels.assurer(cfg, chemins.referentiels(), cles=CLES_ZONAGES)
     fichiers = {c: spec["fichier"] for c, spec in cfg["referentiels"].items()}
     citations = [refs[c].citation(cfg["attribution"]) for c in CLES_ZONAGES if c in refs]
     return fichiers, citations
@@ -155,8 +155,8 @@ def croiser_zonages(racine: Path, emprise_union, aires=None,
     if progression is not None:
         progression("Croisement avec les zonages…")
     return zonages.croiser(
-        emprise_union, zonages.registre(), racine / "referentiels",
-        racine / "referentiels" / "_cache_sig", fichiers, aires=aires,
+        emprise_union, zonages.registre(), chemins.referentiels(),
+        chemins.referentiels() / "_cache_sig", fichiers, aires=aires,
     )
 
 
@@ -182,7 +182,7 @@ def dossier_extraits(racine: Path) -> Path:
     par tout le monde, contrairement aux archives nationales qui ne servent
     qu'à les produire.
     """
-    return racine / "extraits"
+    return chemins.racine_application() / "extraits"
 
 
 def croiser_zonages_extraits(racine: Path, emprise_union, departements: list[str],
@@ -213,7 +213,23 @@ def construire_extraits(racine: Path, departements: list[str] | None = None,
                 if c in CLES_ZONAGES}
     return extraits.construire(
         departements or extraits.departements_metropole(),
-        racine / "referentiels", racine / "referentiels" / "_cache_sig",
+        chemins.referentiels(), chemins.referentiels() / "_cache_sig",
         fichiers, dossier_extraits(racine), versions=versions,
         progression=progression,
     )
+
+
+def emplacements(racine: Path | None = None) -> dict[str, Path]:
+    """Crée les dossiers nécessaires et renvoie où chaque chose vit.
+
+    À appeler au démarrage, avant tout accès : c'est ce qui garantit que les
+    dossiers locaux existent sur une machine qui découvre l'outil.
+    """
+    carte = chemins.preparer()
+    carte["extraits"] = dossier_extraits(racine or chemins.racine_application())
+    return carte
+
+
+def alertes_emplacements() -> list[str]:
+    """Configurations qui se passeront mal, à afficher plutôt qu'à subir."""
+    return chemins.avertissements()

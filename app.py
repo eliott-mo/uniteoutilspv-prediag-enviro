@@ -38,6 +38,7 @@ from prediag_enviro import service, veille, vocabulaire  # noqa: E402
 from prediag_enviro import zonages as mod_zonages  # noqa: E402
 from prediag_enviro import cartes as mod_cartes  # noqa: E402
 from prediag_enviro import extraits as mod_extraits  # noqa: E402
+from prediag_enviro import chemins  # noqa: E402
 from prediag_enviro import sortie_word as mod_word  # noqa: E402
 from prediag_enviro.memoire import ACCEPTE, A_REVOIR, DECISIONS, REFUSE  # noqa: E402
 
@@ -108,8 +109,8 @@ def _classeurs(_jeton: float):
 
 def _jeton_classeurs() -> float:
     """Empreinte de fraîcheur du dossier classeurs/."""
-    dossier = RACINE / "classeurs"
-    return max((p.stat().st_mtime for p in dossier.glob("*.xlsx")), default=0.0)
+    return max((p.stat().st_mtime for p in chemins.classeurs().glob("*.xlsx")),
+               default=0.0)
 
 
 def _memoire():
@@ -141,6 +142,10 @@ def _deposer(fichier) -> Path:
     cible.write_bytes(fichier.getbuffer())
     return cible
 
+
+service.emplacements(RACINE)
+for _alerte in service.alertes_emplacements():
+    st.warning(_alerte)
 
 onglet_a, onglet_b = st.tabs([
     "A · Mise à jour des tables",
@@ -214,7 +219,7 @@ with onglet_a:
     with col_classeurs:
         if not cs:
             st.warning(
-                f"Aucun classeur dans `classeurs/`. Y déposer les fichiers "
+                f"Aucun classeur dans `{chemins.classeurs()}`. Y déposer les fichiers "
                 f"B-Statuts (noms reconnus : {', '.join(service.MOTIFS.values())})."
             )
         else:
@@ -541,7 +546,7 @@ with onglet_b:
         if "decoupage" not in st.session_state:
             with st.spinner("Intersection avec les contours communaux…"):
                 st.session_state.decoupage = mod_communes.communes_concernees(
-                    emprise, cache=RACINE / "referentiels"
+                    emprise, cache=chemins.referentiels()
                 )
         decoupage = st.session_state.decoupage
 
