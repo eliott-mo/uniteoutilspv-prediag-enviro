@@ -181,11 +181,27 @@ LES DEUX ONGLETS
 ----------------
   A · Mise à jour des tables
       Réservé à la responsable environnement : tenue à jour des classeurs de
-      statuts et reconstruction des extraits départementaux.
+      statuts, reconstruction des extraits départementaux, et dépôt des
+      couches sans source nationale (espaces naturels sensibles et assimilés).
 
   B · Prédiag
       Pour tout le monde : emprise du projet, communes, zonages, espèces,
-      cartes et tableaux Word.
+      cartes, et le prédiagnostic Word complet.
+
+LE DOCUMENT PRODUIT
+-------------------
+Il suit la forme du prédiagnostic externe de l'équipe, et part du modèle rangé
+dans « modele » : en-tête au logo, pied de page paginé, styles maison.
+
+Les passages SURLIGNÉS EN JAUNE signalent ce qui reste à compléter, avec à
+chaque fois la consigne de ce qu'on attend à cet endroit.
+
+À la première ouverture, Word met les sommaires à jour. Si ce n'est pas le
+cas : Ctrl+A puis F9.
+
+Le cadre général et les méthodologies viennent de « modele/cadre_general.docx ».
+Ce fichier s'édite dans Word : quand la réglementation ou vos habitudes
+évoluent, c'est là qu'on le dit, pas dans le code.
 """
 
 
