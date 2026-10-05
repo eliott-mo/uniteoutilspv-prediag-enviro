@@ -50,7 +50,7 @@ csv.field_size_limit(10 ** 7)
 #: sur disque est validé par la version du référentiel, qui ne bouge pas quand
 #: c'est notre code qui change. Sans ce garde-fou, un index construit par une
 #: version antérieure se recharge et rend des cellules vides sans rien dire.
-FORMAT = 3
+FORMAT = 4
 
 #: Types de statuts exploités par la veille (les autres sont lus mais ignorés).
 TYPES_SUIVIS = {"LRE", "LRN", "LRR", "LRM", "ZDET", "PN", "PR", "PD", "DH", "DO", "PNA"}
@@ -72,6 +72,18 @@ _ANNEXE = re.compile(r"[Aa]nnexe\s*([IVX]+(?:/\d)?)")
 #: Critère UICN réduit à une lettre minuscule, qui suffixe les « NA ».
 #: « b - Visiteur » donne NAb ; « pr. A2b - Nicheur » n'est pas un suffixe.
 _CRITERE_NA = re.compile(r"^([a-z])(?:\s*-|\s*$)")
+
+#: Critères « NA » qui ne s'écrivent pas, par alignement sur les livrables.
+#:
+#: « a » désigne une espèce introduite. Les prédiagnostics de référence
+#: écrivent alors « NA » tout court : sur les 138 cellules « NA » du livrable
+#: externe, 134 portent un suffixe b, c ou d, et les 4 nues sont les deux
+#: seules espèces dont BDC donne le critère « a » — le surmulot et le Brun des
+#: pélargoniums, tous deux introduits. Publier « NAa » faisait donc apparaître
+#: un écart dans les comparaisons là où les deux documents disent la même
+#: chose. Le code brut, lui, reste « NA » dans `Entree.code`, et la veille
+#: ramène de toute façon tout « NA* » à « NA » (`vocabulaire.normaliser_code`).
+CRITERES_NA_MUETS = frozenset({"a"})
 
 #: Périodes du cycle annuel, telles que `RQ_STATUT` les nomme.
 PERIODE_NICHEUR = "nicheur"
@@ -126,9 +138,11 @@ def _rendu(type_statut: str, code: str, libelle: str, rq: str) -> str:
     if type_statut in ("PNA", "ZDET"):
         return "oui"
     if code == "NA":
-        # « Non applicable » se publie avec son critère : NAb, NAc, NAd.
+        # « Non applicable » se publie avec son critère : NAb, NAc, NAd — mais
+        # pas NAa, voir CRITERES_NA_MUETS.
         trouve = _CRITERE_NA.match(rq.strip())
-        return f"NA{trouve.group(1)}" if trouve else "NA"
+        critere = trouve.group(1) if trouve else ""
+        return "NA" if critere in CRITERES_NA_MUETS else f"NA{critere}"
     return code
 
 
