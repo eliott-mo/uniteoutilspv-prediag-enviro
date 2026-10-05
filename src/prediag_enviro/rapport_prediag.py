@@ -523,6 +523,10 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
 
     comptes = _compter_par_famille_etude(resultat_especes, contexte)
     par_groupe = _especes_par_groupe(resultat_especes, contexte)
+    # Avifaune, chiroptères et autre faune passent en paysage, comme dans le
+    # document de référence : leurs tableaux comptent jusqu'à dix colonnes, et
+    # les 16 cm d'une page portrait les écrasent.
+    avant = rapport.orientation(paysage=True)
     for cle, libelle, cles_groupes in se.FAMILLES_ETUDE:
         rapport.sous_partie(libelle)
         total, a_enjeu = comptes.get(cle, (0, 0))
@@ -555,6 +559,7 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
                                      seulement_enjeu=True)
         rapport.sous_sous_partie("Consultations")
         rapport.a_completer("citer les sources consultées et leur date")
+    rapport.orientation(paysage=avant)
 
 
 def _rayon_aer(projet: Projet) -> str:
@@ -611,6 +616,10 @@ def _annexes(rapport: Rapport, projet: Projet, resultat, contexte) -> list[str]:
     Exhaustives, et non filtrées sur l'enjeu : l'annexe fait foi sur ce qui a
     été consulté, et c'est l'état initial qui retient les espèces à enjeu.
     """
+    # La bascule précède le titre : dans le document de référence, « Annexes »
+    # ouvre la page couchée, il n'est pas relégué en bas de la page portrait
+    # précédente.
+    avant = rapport.orientation(paysage=True)
     rapport.partie("Annexes")
 
     if resultat is None or not resultat.especes or contexte is None:
@@ -619,6 +628,7 @@ def _annexes(rapport: Rapport, projet: Projet, resultat, contexte) -> list[str]:
             "captures) dans la section « Espèces » de l'outil, puis régénérer "
             "ce document"
         )
+        rapport.orientation(paysage=avant)
         return []
 
     rapport.para(
@@ -658,6 +668,7 @@ def _annexes(rapport: Rapport, projet: Projet, resultat, contexte) -> list[str]:
                 "figurent dans aucun tableau. Ils sont repris dans l'outil, "
                 "section « Espèces », pour correction."
             )
+    rapport.orientation(paysage=avant)
     return traites
 
 

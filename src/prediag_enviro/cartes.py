@@ -255,12 +255,35 @@ def _figure_a4():
     return fig, ax_carte, ax_bandeau
 
 
+#: Largeur du bandeau, exprimee en « caracteres x corps ». Calibree sur le
+#: rendu : un titre de 12 points y tient en vingt-sept caracteres.
+LARGEUR_BANDEAU = 330
+
+
+def _replier_bandeau(texte: str, taille: float) -> str:
+    """Replie un texte à la largeur du bandeau, avec de vrais sauts de ligne.
+
+    `wrap=True` de matplotlib replie à l'affichage mais ne touche pas à la
+    chaîne. L'avance verticale, calculée sur le nombre de sauts de ligne,
+    valait donc une seule ligne quel que soit le repli réel : un titre de
+    deux lignes venait mordre sur le nom du projet écrit en dessous.
+    """
+    largeur = max(14, int(LARGEUR_BANDEAU / max(taille, 1)))
+    lignes = []
+    for morceau in str(texte).split("\n"):
+        lignes += textwrap.wrap(morceau, largeur) or [""]
+    return "\n".join(lignes)
+
+
 def _remplir_bandeau(ax, lignes_titre, poignees, source):
     y = 0.98
     for texte, taille, graisse in lignes_titre:
-        ax.text(0.03, y, texte, transform=ax.transAxes, fontsize=taille,
-                fontweight=graisse, va="top", wrap=True)
-        y -= (0.048 if taille > 10 else 0.034) * (str(texte).count("\n") + 1)
+        replie = _replier_bandeau(texte, taille)
+        ax.text(0.03, y, replie, transform=ax.transAxes, fontsize=taille,
+                fontweight=graisse, va="top")
+        y -= (0.048 if taille > 10 else 0.034) * (replie.count("\n") + 1)
+    # Un peu d'air avant la légende, qui suit immédiatement.
+    y -= 0.012
 
     if poignees:
         # Les libellés longs sont repliés : sans cela, « Terrain de

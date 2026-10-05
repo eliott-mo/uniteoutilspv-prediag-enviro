@@ -57,7 +57,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import (WD_ALIGN_PARAGRAPH, WD_BREAK,
                             WD_COLOR_INDEX)
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt, RGBColor
+from docx.shared import Cm, Emu, Pt, RGBColor
 
 from . import chemins
 
@@ -322,6 +322,27 @@ def _passage(enfant):
     return run
 
 
+def _largeur_qui_tient(chemin: Path, largeur_max: float,
+                       hauteur_max: float) -> float:
+    """Largeur, en cm, pour qu'une image tienne dans la place disponible.
+
+    On lit les dimensions du fichier plutôt que de supposer un format : deux
+    planches produites par le même code n'ont pas le même rapport dès que
+    leurs légendes diffèrent de longueur.
+    """
+    try:
+        from PIL import Image
+
+        with Image.open(str(chemin)) as image:
+            largeur_px, hauteur_px = image.size
+        rapport = largeur_px / hauteur_px if hauteur_px else 1.0
+    except Exception:  # noqa: BLE001
+        # Sans dimensions lisibles, on s'en tient à la largeur : mieux vaut une
+        # carte un peu grande qu'une exception au moment de produire.
+        return largeur_max
+    return min(largeur_max, hauteur_max * rapport)
+
+
 class Rapport:
     """Un document en construction.
 
@@ -340,6 +361,8 @@ class Rapport:
         self.styles_recrees = self._assurer_styles()
         self._n_tableau = 0
         self._n_carte = 0
+        #: Orientation courante. Le modèle est en portrait.
+        self._paysage = False
 
     # ------------------------------------------------------------------ styles
 
@@ -713,8 +736,9 @@ class Rapport:
         Les cartes sont produites en A4 paysage. Les poser en portrait obligeait
         à les réduire à 16 cm de large, soit la moitié de leur définition utile :
         les toponymes du fond de plan devenaient illisibles. Le prédiagnostic de
-        référence fait de même — il alterne vingt et une sections pour que
-        chaque carte occupe une page couchée.
+        référence fait de même — il alterne une trentaine de sections pour que
+        chaque carte occupe une page couchée, et pour que les tableaux
+        d'espèces, larges de dix colonnes, respirent.
 
         L'en-tête et le pied de page suivent : une nouvelle section hérite des
         références de la précédente tant qu'on ne les délie pas.
@@ -726,22 +750,84 @@ class Rapport:
             section.orientation = (WD_ORIENT.LANDSCAPE if paysage
                                    else WD_ORIENT.PORTRAIT)
             section.page_width, section.page_height = hauteur, largeur
+        self._paysage = paysage
+
+    def orientation(self, paysage: bool) -> bool:
+        """Bascule la suite du document, si elle n'y est pas déjà.
+
+        Renvoie l'orientation d'avant, pour pouvoir la rétablir. Sans ce
+        garde-fou, demander deux fois le paysage ajouterait un saut de page et
+        une section vide — ce qui se voit.
+        """
+        avant = self._paysage
+        if paysage != avant:
+            self._section(paysage=paysage)
+        return avant
+
+    #: Hauteur réservée à la légende sous une carte.
+    #:
+    #: Large à dessein. Une ligne de « Caption » tient en sept millimètres,
+    #: mais « Carte 3 : Localisation des zonages Natura 2000 jusqu'à 5 km
+    #: autour de la ZIP du projet de Saint-Pierre-lès-Elbeuf » en occupe deux.
+    #: Réserver au plus juste remettrait la légende sur la page suivante au
+    #: premier nom de commune un peu long — ce qui est précisément le défaut
+    #: qu'on corrige. Une carte 4 % plus petite coûte moins cher qu'une
+    #: légende orpheline.
+    PLACE_LEGENDE_CM = 2.2
+
+    def _place_utile(self) -> tuple[float, float]:
+        """Largeur et hauteur disponibles dans la section courante, en cm.
+
+        Une soustraction entre `Length` rend un entier d'EMU et non une
+        `Length` : on la reconstruit, sinon `.cm` n'existe pas. Les marges
+        peuvent par ailleurs être héritées, donc absentes.
+        """
+        section = self.document.sections[-1]
+
+        def _emu(valeur) -> int:
+            return int(valeur) if valeur is not None else 0
+
+        largeur = Emu(_emu(section.page_width) - _emu(section.left_margin)
+                      - _emu(section.right_margin))
+        hauteur = Emu(_emu(section.page_height) - _emu(section.top_margin)
+                      - _emu(section.bottom_margin))
+        return largeur.cm, hauteur.cm
 
     def carte(self, chemin: Path, legende: str = "",
               largeur_cm: float | None = None, paysage: bool = True) -> int:
-        """Insère une carte sur sa propre page, avec sa légende numérotée."""
+        """Insère une carte sur sa propre page, avec sa légende numérotée.
+
+        La taille est **calculée depuis l'image**, pas fixée. Une largeur
+        constante ne pouvait pas marcher : les planches sortent de matplotlib
+        avec `bbox_inches="tight"`, qui rogne différemment selon la longueur
+        des libellés de légende, et leur rapport va de 1,37 à 1,49. À 24 cm de
+        large, les quatre cartes faisaient entre 16,1 et 17,5 cm de haut pour
+        16,0 cm utiles — toutes débordaient, et chassaient leur légende sur la
+        page suivante, qui restait vide par ailleurs.
+
+        On réserve donc la place de la légende et on ajuste la carte au reste.
+        `keep_with_next` interdit en plus la séparation si quelqu'un remanie le
+        document ensuite.
+        """
         self._n_carte += 1
-        if paysage:
-            self._section(paysage=True)
-        largeur = largeur_cm or (24.0 if paysage else 16.0)
+        # On retient l'orientation d'avant plutôt que de supposer le portrait :
+        # les volets d'espèces sont en paysage, et une carte insérée là ne doit
+        # pas les en faire sortir.
+        avant = self.orientation(paysage=paysage)
+
+        dispo_largeur, dispo_hauteur = self._place_utile()
+        if legende:
+            dispo_hauteur -= self.PLACE_LEGENDE_CM
+        largeur = largeur_cm or _largeur_qui_tient(chemin, dispo_largeur,
+                                                   dispo_hauteur)
 
         paragraphe = self.document.add_paragraph()
         paragraphe.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraphe.paragraph_format.keep_with_next = True
         paragraphe.add_run().add_picture(str(chemin), width=Cm(largeur))
         if legende:
             self._legende("Carte", self._n_carte, legende, centree=True)
-        if paysage:
-            self._section(paysage=False)
+        self.orientation(paysage=avant)
         return self._n_carte
 
     # ------------------------------------------------------------ pied, sortie
@@ -796,13 +882,17 @@ def colonnes_zonages() -> list[Colonne]:
     Pas de colonne « Type » : le type devient la ligne fusionnée qui groupe les
     entrées, comme dans le document de référence.
     """
+    # Les largeurs sont converties en pourcentages de la justification : seuls
+    # leurs rapports comptent. « Intérêt » reçoit près de la moitié du tableau
+    # parce qu'il porte un paragraphe entier de description, là où les quatre
+    # autres colonnes tiennent un nom, deux codes et une distance.
     return [
-        Colonne("Nom", "nom", largeur_cm=4.2),
-        Colonne("Distance à la ZIP", "distance", centree=True, largeur_cm=2.2),
-        Colonne("Identifiant", "identifiant", centree=True, largeur_cm=2.2),
-        Colonne("Intérêt", "interet", largeur_cm=5.4),
+        Colonne("Nom", "nom", largeur_cm=3.4),
+        Colonne("Distance à la ZIP", "distance", centree=True, largeur_cm=1.8),
+        Colonne("Identifiant", "identifiant", centree=True, largeur_cm=2.0),
+        Colonne("Intérêt", "interet", largeur_cm=7.0),
         Colonne("Aire(s) d'étude concernée(s)", "aires", centree=True,
-                largeur_cm=2.0),
+                largeur_cm=1.8),
     ]
 
 
