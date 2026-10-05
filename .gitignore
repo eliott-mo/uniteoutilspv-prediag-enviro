@@ -44,3 +44,9 @@ extraits/*
 # Alias appris par l équipe : donnée de production, pas du code
 alias/*
 !alias/.gitkeep
+
+# Couches locales deposees par l equipe (ENS et assimiles) et leur registre :
+# donnee de production comme les alias, et une couche departementale peut peser
+# des dizaines de megaoctets. Meme raison que pour extraits/ et sorties/.
+sources_locales/*
+!sources_locales/.gitkeep

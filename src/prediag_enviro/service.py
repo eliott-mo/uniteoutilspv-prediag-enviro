@@ -16,7 +16,8 @@ from pathlib import Path
 
 import yaml
 
-from . import bdc, chemins, classeurs, extraits, referentiels, taxref, veille, zonages
+from . import (bdc, chemins, classeurs, extraits, referentiels,
+               sources_locales, taxref, veille, zonages)
 from .memoire import Memoire
 
 #: Motifs de reconnaissance des classeurs déposés, par groupe.
@@ -193,8 +194,29 @@ def croiser_zonages_extraits(racine: Path, emprise_union, departements: list[str
     Lève `extraits.DepartementAbsent` si le projet sort du périmètre construit,
     plutôt que de rendre une liste vide qui passerait pour un résultat.
     """
-    return extraits.croiser(emprise_union, departements,
-                            dossier_extraits(racine), aires=aires)
+    resultat = extraits.croiser(emprise_union, departements,
+                                dossier_extraits(racine), aires=aires)
+    fusionner_sources_locales(resultat, emprise_union, departements, aires)
+    return resultat
+
+
+def fusionner_sources_locales(resultat, emprise_union, departements: list[str],
+                              aires=None) -> None:
+    """Ajoute au croisement les couches déposées par l'équipe.
+
+    Les espaces naturels sensibles n'ont pas de couche nationale fiable : ils
+    relèvent du Département ou de la région, et la responsable environnement
+    les cherche au cas par cas. Ce qu'elle dépose s'ajoute donc ici, aux côtés
+    des zonages nationaux, et son avertissement voyage avec.
+    """
+    locaux, geometries, employees, anomalies = sources_locales.croiser(
+        emprise_union, departements, aires)
+    resultat.zonages.extend(locaux)
+    resultat.zonages.sort(key=lambda z: (z.famille, z.type, z.distance_m))
+    resultat.geometries.update(geometries)
+    resultat.sources_locales.extend(employees)
+    resultat.manquants.extend(anomalies)
+    resultat.avertissements.extend(sources_locales.avertissements(departements))
 
 
 def etat_extraits(racine: Path):

@@ -97,6 +97,17 @@ def alias() -> Path:
     return racine_application() / "alias"
 
 
+def sources_locales() -> Path:
+    """Couches sans source nationale fiable — ENS en tête — et leur registre.
+
+    À côté de l'application, comme le dictionnaire d'alias et pour la même
+    raison : ce que quelqu'un a mis une heure à dénicher pour la Seine-Maritime
+    doit servir au projet suivant dans le même département, pas rester sur son
+    poste.
+    """
+    return racine_application() / "sources_locales"
+
+
 def classeurs() -> Path:
     """Les classeurs B-Statuts, à côté du code : c'est un actif partagé.
 
@@ -120,6 +131,7 @@ def preparer() -> dict[str, Path]:
         "classeurs": classeurs(),
     }
     emplacements["alias"] = alias()
+    emplacements["sources_locales"] = sources_locales()
     for cle in ("referentiels", "sorties", "memoire"):
         emplacements[cle].mkdir(parents=True, exist_ok=True)
     return emplacements

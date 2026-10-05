@@ -321,6 +321,22 @@ def _cadre(emprise_union, rayon_m: float, marge: float = 0.08):
     return box(cx_ - demi, cy_ - demi, cx_ + demi, cy_ + demi)
 
 
+#: Ordre d'affichage des types, repris du registre des sources : c'est celui
+#: du document, et il ne dépend ni du projet ni des distances.
+_ORDRE_TYPES: list[str] = []
+
+
+def _rang_type(type_libelle: str) -> int:
+    global _ORDRE_TYPES
+    if not _ORDRE_TYPES:
+        from . import zonages as mod_zonages
+        _ORDRE_TYPES = [s.type_libelle for s in mod_zonages.registre()]
+    try:
+        return _ORDRE_TYPES.index(type_libelle)
+    except ValueError:
+        return len(_ORDRE_TYPES)
+
+
 def _dessiner_zonages(ax, couches, cadre_l93):
     """Dessine les zonages d'une famille. Renvoie (poignées, étiquettes)."""
     # Découpage dans la projection d'AFFICHAGE : couper en Lambert-93 puis
@@ -331,7 +347,12 @@ def _dessiner_zonages(ax, couches, cadre_l93):
     poignees, etiquettes = [], []
     vus = set()
 
-    for type_zonage, gdf in couches.items():
+    # Les couches arrivent dans l'ordre des distances, ce qui donnait une
+    # légende où « ZNIEFF de type II » précédait « ZNIEFF de type I » dès
+    # qu'une type II touchait l'emprise. L'ordre du registre est celui du
+    # document, et il ne dépend pas du projet.
+    for type_zonage, gdf in sorted(couches.items(),
+                                   key=lambda c: _rang_type(c[0])):
         couleur = COULEURS.get(type_zonage, COULEUR_DEFAUT)
         style = "--" if type_zonage in TIRETE else "-"
         decoupe = gdf.to_crs(CRS_AFFICHAGE).clip(cadre_affichage)
@@ -347,17 +368,50 @@ def _dessiner_zonages(ax, couches, cadre_l93):
         for _, ligne in decoupe.iterrows():
             point = ligne.geometry.representative_point()
             etiquettes.append((point.x, point.y,
-                               _replier(ligne.get("_nom") or "", 18, 3),
+                               _replier(ligne.get("_nom") or "", 22, 4),
                                couleur, "zone"))
     return poignees, etiquettes
 
 
 def _dessiner_emprise(ax, emprise_gdf):
+    """Trace l'emprise du projet — l'objet même de la carte.
+
+    Elle était dessinée comme les zonages : un aplat teinté à 30 %. Sur une
+    carte de ZNIEFF, où le type I est rouge lui aussi, l'emprise disparaissait
+    dans le zonage qui la recouvrait. Or c'est le seul objet que le lecteur
+    cherche d'abord.
+
+    Elle se distingue donc par sa **nature** et pas par sa teinte : un liseré
+    blanc qui la détache de tout fond, une trame hachurée qu'aucun zonage
+    n'emploie, et un contour franc par-dessus. Changer la teinte des ZNIEFF
+    aurait réglé le cas des ZNIEFF, et pas celui des réserves rouges.
+    """
     affichage = emprise_gdf.to_crs(CRS_AFFICHAGE)
-    affichage.plot(ax=ax, facecolor=COULEUR_EMPRISE, edgecolor=COULEUR_EMPRISE,
-                   alpha=0.30, linewidth=2.2, zorder=6)
+    # Liseré blanc dessous : il détache le contour aussi bien d'un aplat
+    # sombre que du fond de plan clair.
+    affichage.plot(ax=ax, facecolor="none", edgecolor="white", linewidth=5.0,
+                   zorder=6)
+    affichage.plot(ax=ax, facecolor="none", edgecolor=COULEUR_EMPRISE,
+                   linewidth=2.4, hatch="///", zorder=7)
     centre = affichage.geometry.union_all().representative_point()
     return [(centre.x, centre.y, 26)]
+
+
+def _poignee_emprise():
+    """Poignée de légende reprenant exactement la trame de l'emprise."""
+    return Patch(facecolor="none", edgecolor=COULEUR_EMPRISE, linewidth=1.6,
+                 hatch="///", label="Emprise du projet (ZIP)")
+
+
+def _rayon_lisible(metres: float) -> str:
+    """« 200 m », « 5 km » — et non « 5000 m », qui se relit deux fois.
+
+    L'espace est insécable : le repli des libellés de légende coupait sinon
+    entre le nombre et son unité, « (5 » restant seul en fin de ligne.
+    """
+    if metres >= 1000:
+        return f"{metres / 1000:.0f} km".replace(".", ",")
+    return f"{metres:.0f} m"
 
 
 def _dessiner_aires(ax, emprise_union, aires):
@@ -370,10 +424,60 @@ def _dessiner_aires(ax, emprise_union, aires):
                                crs=CRS_METRIQUE).to_crs(CRS_AFFICHAGE)
         anneau.boundary.plot(ax=ax, color=COULEUR_AIRE, linewidth=1.1,
                              linestyle=(0, (6, 4)), alpha=0.75, zorder=5)
-        poignees.append(Line2D([], [], color=COULEUR_AIRE, linewidth=1.1,
-                               linestyle=(0, (6, 4)),
-                               label=f"{aire.libelle} ({aire.rayon_m:.0f} m)"))
+        poignees.append(Line2D(
+            [], [], color=COULEUR_AIRE, linewidth=1.1, linestyle=(0, (6, 4)),
+            label=f"{aire.libelle} ({_rayon_lisible(aire.rayon_m)})"))
     return poignees
+
+
+def dessiner_aires_etude(emprise_gdf, aires, chemin: Path, nom_projet: str,
+                         source: str = "UNITe") -> Carte:
+    """Carte de situation : l'emprise et ses aires d'étude, sans aucun zonage.
+
+    C'est la première carte du prédiagnostic de référence, et elle vient avant
+    qu'on parle d'enjeux : elle situe le projet et montre ce que recouvrent la
+    ZIP, l'aire d'étude immédiate et l'aire d'étude rapprochée. Sans elle, le
+    lecteur découvre les aires d'étude dans la légende d'une carte de ZNIEFF,
+    alors que toutes les distances du rapport s'y réfèrent.
+    """
+    emprise_union = emprise_gdf.geometry.union_all()
+    rayon = max((a.rayon_m for a in aires), default=5000.0)
+    cadre_l93 = _cadre(emprise_union, rayon)
+    x0, y0, x1, y1 = (gpd.GeoSeries([cadre_l93], crs=CRS_METRIQUE)
+                      .to_crs(CRS_AFFICHAGE).total_bounds)
+
+    fig, ax, ax_bandeau = _figure_a4()
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+    ax.apply_aspect()
+
+    fond_pose = _poser_fond(ax)
+    poignees_a = _dessiner_aires(ax, emprise_union, aires)
+    obstacles = _dessiner_emprise(ax, emprise_gdf)
+
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+    _placer_etiquettes(ax, [], obstacles=obstacles)
+    _fleche_nord(ax)
+    _barre_echelle(ax, cadre_l93.centroid)
+
+    poignees = [_poignee_emprise()]
+    poignees += poignees_a
+    lignes_titre = [("Aires d'étude du projet", 12, "bold"),
+                    (nom_projet, 9, "normal")]
+    if not fond_pose:
+        lignes_titre.append(
+            ("⚠ Fond de plan indisponible au moment du rendu — relancer la "
+             "production des cartes", 7.5, "normal")
+        )
+    _remplir_bandeau(ax_bandeau, lignes_titre, poignees, source)
+
+    ax.set_axis_off()
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(chemin, dpi=200, bbox_inches="tight", pad_inches=0.15)
+    plt.close(fig)
+    return Carte(famille="aires", titre="Aires d'étude du projet",
+                 chemin=chemin, nb_zonages=0)
 
 
 def dessiner_famille(famille: str, titre: str, couches: dict, emprise_gdf,
@@ -407,8 +511,7 @@ def dessiner_famille(famille: str, titre: str, couches: dict, emprise_gdf,
     _fleche_nord(ax)
     _barre_echelle(ax, cadre_l93.centroid)
 
-    poignees = [Patch(facecolor=COULEUR_EMPRISE, edgecolor=COULEUR_EMPRISE,
-                      alpha=0.45, label="Emprise du projet (ZIP)")]
+    poignees = [_poignee_emprise()]
     poignees += poignees_a + poignees_z
     lignes_titre = [(titre, 12, "bold"), (nom_projet, 9, "normal")]
     if not fond_pose:
@@ -429,8 +532,9 @@ def dessiner_famille(famille: str, titre: str, couches: dict, emprise_gdf,
 
 
 def produire(resultat, emprise_gdf, aires, dossier: Path, nom_projet: str,
-             familles=None, source: str = "UNITe") -> list[Carte]:
-    """Produit une carte par famille de zonages présente.
+             familles=None, source: str = "UNITe",
+             avec_situation: bool = True) -> list[Carte]:
+    """Produit la carte de situation, puis une carte par famille présente.
 
     Une carte par famille plutôt qu'une carte unique : superposer ZNIEFF,
     Natura 2000 et espaces protégés sur un même fond donne un dégradé illisible
@@ -440,6 +544,9 @@ def produire(resultat, emprise_gdf, aires, dossier: Path, nom_projet: str,
 
     familles = familles or mod_zonages.FAMILLES
     produites: list[Carte] = []
+    if avec_situation:
+        produites.append(dessiner_aires_etude(
+            emprise_gdf, aires, dossier / "carte_aires.png", nom_projet, source))
     for famille, titre in familles:
         couches = resultat.couches(famille)
         if not couches:

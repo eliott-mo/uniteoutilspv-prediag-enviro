@@ -8,7 +8,7 @@ Deux onglets, dans l'ordre où on s'en sert.
 | Onglet | Objet |
 |---|---|
 | **A · Mise à jour des tables** | ce qui a bougé dans les référentiels depuis la dernière révision des classeurs B-Statuts |
-| **B · Prédiag** | emprise projet, communes, recoupement des sources d'espèces, tableaux Word |
+| **B · Prédiag** | emprise projet, communes, zonages, cartes, espèces, prédiagnostic Word |
 
 ```bash
 streamlit run app.py
@@ -125,7 +125,156 @@ Six étapes, chacune avec son point de contrôle.
    date la plus récente retenue, conflits signalés. Les **non résolus** se
    corrigent à la main, et l'outil retient l'association pour les études
    suivantes.
-6. **Tableau Word** — aux conventions UNITe, prêt à coller dans l'étude.
+6. **Prédiagnostic Word** — le document complet, dans la forme du
+   prédiagnostic interne de l'équipe.
+
+### Le document produit
+
+La structure reprend celle du prédiagnostic interne, et non celle de l'étude
+d'impact externe : c'est le document court qu'un chef de projet génère et que
+la responsable environnement complète.
+
+```
+Page de garde                            site, surface, aires, date d'édition
+Sommaire · Sommaire des tableaux · Sommaire des cartes
+Zone d'étude : analyse générale          surface, communes, aires, carte 1
+Patrimoine naturel                       dénombrement, tableaux, cartes 2 à 4
+Zones humides
+Espèces recensées sur la commune         un tableau par groupe
+Conclusion                               note de risque de 0 à 10 par groupe
+Sources
+```
+
+### Le modèle Word
+
+Le document ne part pas d'une page blanche. `modele/prediag_modele.docx` est
+tiré du prédiagnostic de référence de l'équipe, vidé de son contenu : il
+apporte l'**en-tête au logo**, le **pied de page paginé**, les marges et les
+styles maison — « Titre partie », « Style1 », « Titre colonne », « Corps de
+texte - Unite », « Table Grid ». La première version les recréait à
+l'approchant, ce qui donnait un document qui ne ressemblait à rien de ce que
+l'équipe produit.
+
+Deux pièges ont été rencontrés en le fabriquant, qui valent d'être notés pour
+la prochaine mise à jour du modèle :
+
+* la `sectPr` de fin de corps est celle de la **dernière** section du document
+  source — une carte, donc en paysage. Un modèle naïf sortait toutes ses pages
+  couchées ;
+* seule la **première** section porte les références vers l'en-tête et le pied
+  de page. Garder la dernière donnait un modèle où `header1.xml` et
+  `footer1.xml` existaient dans le paquet sans que rien ne les appelle : ni
+  logo, ni pagination.
+
+Le modèle est aussi purgé des propriétés du document d'origine (auteur,
+révisions) : il part d'un livrable réel, et cette vérification est faite à
+chaque reconstruction.
+
+Un modèle déposé dans l'interface prend le pas sur celui-ci.
+
+### La mise en forme des tableaux
+
+Elle est **relevée** dans le document de référence, pas choisie. Deux
+observations ont tout déterminé :
+
+* les tableaux n'ont **pas de traits** — leurs bordures sont blanches, et
+  c'est l'ombrage des cellules qui les structure. Reproduire « Table Grid » et
+  ses filets noirs donnait des tableaux que personne de l'équipe n'aurait
+  reconnus ;
+* l'ombrage des cellules de statut **code la catégorie de liste rouge**. Le
+  couple valeur/couleur a été extrait de ses 243 cellules colorées plutôt que
+  deviné : LC vert, NT jaune pâle, VU jaune, EN orange, CR rouge, NA gris,
+  DD gris clair. `RE`, `EX` et `CR*` n'y figuraient pas et prennent le rouge
+  de `CR` — extrapolation assumée, et signalée dans le code.
+
+S'y ajoutent l'en-tête vert répété en haut de chaque page (un tableau
+d'avifaune fait couramment quarante lignes), la première colonne gardée en
+vert parce que c'est elle qui identifie la ligne, et des marges de cellule
+serrées à 70 dxa — les tableaux d'espèces ont jusqu'à dix colonnes.
+
+### Les zonages sans source nationale fiable
+
+Les espaces naturels sensibles n'en ont pas. La question posée à la
+responsable environnement a tranché la conception :
+
+> « départementaux, régionaux, ça dépend, il faut fouiller à chaque fois pour
+> dénicher les infos les plus à jour. J'ai même une couche nationale censée se
+> mettre à jour au fur et à mesure mais comme je sais qu'elle n'est pas
+> toujours à jour, et bah je fouille »
+
+L'INPN diffuse bien une couche ENS, mais il la décrit comme « en
+construction » et prévient qu'elle « ne peut être considérée comme exhaustive
+ni utilisée comme donnée de référence ». La brancher en silence remplacerait
+un doute éclairé par une fausse certitude : le document afficherait un chiffre
+sourcé, et un chef de projet le croirait.
+
+`sources_locales.py` fait donc trois choses.
+
+**Il dit ce qu'il ne sait pas.** Quand aucune source n'est enregistrée pour le
+département, le prédiagnostic l'écrit sous le tableau : l'absence de ligne ne
+vaut pas absence de zonage. Quand une source est enregistrée et qu'elle se
+sait incomplète, son avertissement voyage avec elle jusqu'au document.
+
+**Il accepte ce qu'on dépose.** Une couche — ZIP de shapefile, GeoJSON,
+GeoPackage, KML — est croisée avec l'emprise et mise en forme comme les
+zonages nationaux, carte comprise. Une source sans couche, quand on n'a
+consulté qu'un visualiseur, est seulement citée en bibliographie.
+
+**Il garde ce qui a été trouvé.** Le registre retient, par département, la
+source, son lien et sa date de consultation. Le projet suivant dans le même
+département n'a plus à refouiller. C'est le mécanisme du dictionnaire d'alias,
+pour la même raison : une recherche faite une fois profite à toute l'équipe —
+un fichier par contributeur, fusionnés à la lecture, parce que deux personnes
+qui écrivent le même fichier sur un dossier synchronisé en perdent une.
+
+### Le bandeau gris du pied de page
+
+Il est **ancré au paragraphe** qui porte les dessins, soit le deuxième des
+quatre que comptait le pied. Les deux derniers ne contenaient rien : ni texte,
+ni champ, ni dessin, mais chacun une hauteur de ligne. Ils repoussaient le
+bandeau d'environ un centimètre au-dessus du bord de page, d'où une bande
+blanche en bas de chaque page. Le constructeur du modèle retire les
+paragraphes de fin réellement vides — et seulement ceux-là : celui qui porte
+les dessins n'a pas de texte non plus.
+
+### Sommaires et numérotation
+
+Les numéros de tableaux et de cartes sont posés dans des champs `SEQ`, avec
+leur valeur déjà calculée. Deux conséquences : Word peut les recalculer si
+quelqu'un insère un tableau au milieu, et les **sommaires des tableaux et des
+cartes** se construisent tout seuls — sans champ `SEQ`, Word ne saurait pas
+distinguer un tableau d'une carte. Le document demande la mise à jour des
+champs à l'ouverture ; à défaut, Ctrl+A puis F9.
+
+Chaque carte occupe une **page en paysage**, comme dans le prédiagnostic de
+référence. Les poser en portrait obligeait à les réduire à 16 cm de large,
+soit la moitié de leur définition utile, et les toponymes du fond de plan
+devenaient illisibles.
+
+Ce que l'outil écrit lui-même : les dénombrements (« dans l'aire d'étude
+rapprochée, on recense 5 ZNIEFF de type I et 1 ZNIEFF de type II »), les
+distances, l'appartenance aux aires d'étude, les statuts de chaque espèce lus
+dans BDC-Statuts, les cartes, la numérotation des tableaux et des figures.
+
+Ce qu'il laisse : tout jugement. Chaque trou est écrit en couleur et **formule
+sa consigne** — « indiquer lesquelles de ces espèces peuvent effectivement se
+trouver sur la ZIP au regard de leur écologie » — pour que le document se
+parcoure une fois et qu'on sache quoi faire. La frontière ne passe pas où on la
+met d'instinct : « 18 ZNIEFF sont présentes » est du comptage et revient à
+l'outil ; « les interactions avec la ZIP sont peu probables » est un jugement
+et revient à l'experte.
+
+Les tableaux de zonages portent une **ligne fusionnée par type**, comme le
+document de référence : « ZNIEFF de type I » occupe une ligne à lui seul et ses
+entrées suivent dessous, plutôt qu'une colonne « Type » qui répète la même
+valeur onze fois.
+
+Les tableaux d'espèces ont les colonnes de leur groupe, reprises du document de
+référence : protection régionale et directive Habitats pour la flore ; annexe I
+de la directive Oiseaux et trois colonnes de liste rouge nationale — nicheurs,
+hivernants, de passage — pour l'avifaune ; annexe II et liste rouge pour les
+autres groupes. Le groupe se déduit du taxon (`GROUP3_INPN`) et ne se demande
+pas : un export de faune mêle les groupes.
 
 ### Ce que l'onglet B ne fait pas
 
@@ -259,7 +408,14 @@ src/prediag_enviro/
     rapport.py        sortie Excel
     communes.py       emprise projet, communes et parts de surface
     recoupement.py    sources d'espèces déposées → liste unique
-    sortie_word.py    tableaux aux conventions UNITe
+    zonages.py        croisement avec les zonages du patrimoine naturel
+    extraits.py       extraits départementaux, construits une fois
+    cartes.py         planches A4 paysage, fond Plan IGN
+    statuts_especes.py colonnes de statuts par groupe, résolues sur BDC
+    sortie_word.py    construction du document (compteurs, tableaux, styles)
+    rapport_prediag.py assemblage du prédiagnostic
+
+    modele/prediag_modele.docx   en-tête, pied de page, styles maison
     service.py        orchestration partagée interface / ligne de commande
 ```
 
@@ -304,10 +460,21 @@ réellement couvertes.
 - **Les listes rouges européennes de BDC sont sans édition déclarée.** Les
   écarts constatés sur `LRE` ressemblent à des différences d'édition plutôt
   qu'à des erreurs, mais rien dans les données ne permet de trancher.
-- **Les zonages ne sont pas encore produits** : ZNIEFF, Natura 2000, espaces
-  protégés et inventaire du patrimoine géologique sont téléchargeables chez
-  l'INPN et alimenteront les tableaux 8 à 10 et leurs cartes, mais la chaîne
-  n'est pas écrite.
+- **La couverture européenne de BDC est partielle.** `LRE` ne porte que
+  421 entrées pour les oiseaux, 29 pour les reptiles et 16 pour les
+  amphibiens : la colonne « Liste rouge Europe » reste souvent vide, et une
+  case vide y signifie « non renseigné dans BDC », non « non évalué ». BDC
+  porte parfois une évaluation **mondiale** là où il n'a pas d'évaluation
+  européenne ; elle n'est pas recopiée dans la colonne Europe.
+- **Les zones humides ne sont pas alimentées.** Les couches de sols et de
+  milieux humides ne sont pas nationales et relèvent de sources régionales. La
+  rubrique sort avec une consigne qui nomme les sources à consulter.
+- **La casse des noms de zonages est une aide de présentation.** Les noms que
+  le référentiel porte tout en capitales sont remis en casse de lecture, avec
+  une liste de particules et de noms communs de géographie. Un nom commun
+  absent de cette liste prend une capitale de trop : coquille visible et
+  corrigeable, préférée à la décapitalisation des noms propres que produisait
+  le passage en bas de casse.
 - **L'écriture dans les classeurs n'est pas implémentée**, délibérément. Le jour
   où elle le sera, elle passera par le pilotage d'Excel (et non par une
   réécriture du fichier), travaillera sur copie horodatée, n'appliquera que les

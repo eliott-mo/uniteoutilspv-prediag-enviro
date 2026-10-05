@@ -113,6 +113,12 @@ class Resultat:
     #: les retrouver demanderait de refaire le croisement, qui prend une
     #: trentaine de secondes.
     geometries: dict[str, "gpd.GeoDataFrame"] = field(default_factory=dict)
+    #: Couches locales employées — ENS et autres zonages sans source nationale
+    #: fiable. Elles doivent figurer en bibliographie avec leur date.
+    sources_locales: list = field(default_factory=list)
+    #: Ce qu'il faut dire au lecteur sur ces zonages : une couche qui se sait
+    #: incomplète, ou aucune source enregistrée pour le département.
+    avertissements: list[str] = field(default_factory=list)
 
     def couches(self, famille: str) -> dict[str, "gpd.GeoDataFrame"]:
         """Géométries d'une famille, prêtes à cartographier."""
@@ -129,9 +135,8 @@ class Resultat:
         compte: dict[str, int] = {}
         for z in self.zonages:
             compte[z.type] = compte.get(z.type, 0) + 1
-        # Pas de « s » automatique : « ZNIEFF de type I » ne se pluralise pas
-        # en « ZNIEFF de type Is ». Le nombre devant suffit à dire le pluriel.
-        bouts = [f"{n} {t}" for t, n in sorted(compte.items(), key=lambda x: -x[1])]
+        bouts = [f"{n} {pluriel(t, n)}"
+                 for t, n in sorted(compte.items(), key=lambda x: -x[1])]
         return "Dans les aires d'étude : " + ", ".join(bouts) + "."
 
 
@@ -306,28 +311,293 @@ def nettoyer_texte(brut: str, limite: int = 900) -> str:
     texte = html.unescape(str(brut or ""))
     texte = _BALISE.sub(" ", texte)
     texte = _ESPACES.sub(" ", texte).strip()
+    # Description entièrement entre guillemets : plusieurs rédacteurs de
+    # fiches ZNIEFF citent leur propre texte. Le guillemet fermant tombe au-delà
+    # de la troncature, si bien que seul l'ouvrant arrive dans la cellule — et
+    # compter les guillemets pour détecter l'orphelin ne suffisait donc pas,
+    # puisqu'ils sont bien deux dans la source.
+    if texte.startswith('"'):
+        if texte.endswith('"'):
+            texte = texte[1:-1].strip()
+        elif texte.endswith('".'):
+            texte = texte[1:-2].strip() + "."
+        elif texte.count('"') % 2 == 1:
+            # Ouvrant sans fermant : rien à préserver.
+            texte = texte[1:].lstrip()
+        # Sinon le rédacteur cite un passage précis : ses guillemets restent.
     if len(texte) <= limite:
         return texte
     coupe = texte[:limite].rsplit(". ", 1)[0]
     return (coupe + ".") if len(coupe) > limite * 0.5 else texte[:limite].rstrip() + "…"
 
 
-def casse_lisible(nom: str) -> str:
-    """Renvoie le nom tel que le référentiel le porte. Volontairement.
+#: Particules qui restent en bas de casse à l'intérieur d'un nom.
+#: « à » autant que « a » : les sources mêlent les deux, et un nom déjà en
+#: casse mixte porte souvent la forme accentuée — « Frayère À Esturgeons ».
+_PARTICULES = {"de", "du", "des", "d", "la", "le", "les", "l", "a", "à",
+               "au", "aux", "en", "et", "sur", "sous", "pres", "près",
+               "vers", "par", "dans", "entre", "lez", "lès", "ou"}
 
-    Les fiches ZNIEFF sont souvent en capitales — « BOIS ALLUVIAUX, MARAIS,
-    BRAS MORTS ET FLEUVE LA SEINE » — et la tentation est de les passer en
-    casse normale. On l'a essayé : ça donne « fleuve la seine », « la
-    villeneuve-au-chatelot », « la louverie ». Des noms propres décapitalisés,
-    donc des fautes introduites par l'outil, et plus discrètes que les
-    capitales qu'elles remplacent — donc plus susceptibles de passer dans le
-    livrable.
+#: Noms communs qui ne prennent pas de capitale, sauf en tête de nom.
+#:
+#: Les noms de ZNIEFF suivent presque tous la même forme : un type de milieu,
+#: puis un toponyme — « RUISSEAU DE LA GORGE DE CHATRICES », « PRAIRIES AUTOUR
+#: DE L'ETANG DES BERCETTES ». Le type de milieu ouvre le nom et garde donc sa
+#: capitale ; les noms communs qui suivent ne devraient pas en avoir. Cette
+#: liste est ce qui sépare « Bois alluviaux, marais, bras morts et fleuve la
+#: Seine » de « Bois Alluviaux, Marais, Bras Morts et Fleuve la Seine ».
+#:
+#: Les formes sont **accentuées** : la correction des accents s'applique avant
+#: cette recherche.
+_COMMUNS = {
+    # orientations et situations
+    "nord", "sud", "est", "ouest", "nord-est", "nord-ouest", "sud-est",
+    "sud-ouest", "amont", "aval", "autour", "abords", "bord", "bords",
+    "environs", "confluence", "confluent", "partie", "secteur", "ensemble",
+    "haute", "hautes", "haut", "hauts", "basse", "basses", "bas",
+    "ancien", "ancienne", "anciens", "anciennes", "petit", "petite", "petits",
+    "petites", "grand", "grande", "grands", "grandes", "vieux", "vieille",
+    # milieux
+    "bois", "boisement", "boisements", "forêt", "forêts", "forestier",
+    "forestière", "massif", "hêtraie", "chênaie", "aulnaie", "ripisylve",
+    "prairie", "prairies", "pelouse", "pelouses", "lande", "landes",
+    "pâture", "pâtures", "verger", "vergers", "friche", "friches",
+    "marais", "tourbière", "tourbières", "roselière", "roselières",
+    "étang", "étangs", "mare", "mares", "lac", "lacs", "rivière", "rivières",
+    "ruisseau", "ruisseaux", "fleuve", "cours", "eau", "eaux", "source",
+    "sources", "vallée", "vallées", "vallon", "vallons", "gorge", "gorges",
+    "combe", "combes", "plaine", "plaines", "plateau", "coteau", "coteaux",
+    "butte", "buttes", "côtes", "falaise", "falaises", "carrière",
+    "carrières", "sablière", "gravière", "bras", "méandre", "méandres",
+    "île", "îles", "boucle", "bassin", "versant", "zone", "zones", "site",
+    "sites", "pont", "moulin", "château", "église", "ferme", "gîte", "gîtes",
+    # qualificatifs fréquents
+    "alluviaux", "alluviale", "alluviales", "humide", "humides", "morts",
+    "morte", "mortes", "sèche", "sèches", "calcaire", "calcaires",
+    "siliceux", "tourbeux", "tourbeuse", "boisé", "boisée", "boisés",
+}
 
-    Entre une laideur visible qui vient de la source et une faute invisible qui
-    vient de nous, on garde la laideur. Les quelques noms retenus seront
-    reformatés à la relecture, en connaissance de cause.
+#: Accents perdus par la mise en capitales de la source. Volontairement court
+#: et sans ambiguïté : « COTE » peut être une côte, un coteau ou la Côte 304
+#: de Verdun, donc il n'y figure pas.
+_ACCENTS = {
+    "foret": "forêt", "forets": "forêts", "forestiere": "forestière",
+    "riviere": "rivière", "rivieres": "rivières", "etang": "étang",
+    "etangs": "étangs", "vallee": "vallée", "vallees": "vallées",
+    "ile": "île", "iles": "îles", "chateau": "château", "eglise": "église",
+    "chene": "chêne", "chenes": "chênes", "chenaie": "chênaie",
+    "hetre": "hêtre", "hetraie": "hêtraie", "frene": "frêne",
+    "frenes": "frênes", "tete": "tête", "reserve": "réserve",
+    "tourbiere": "tourbière", "tourbieres": "tourbières", "paturе": "pâture",
+    "pature": "pâture", "patures": "pâtures", "roseliere": "roselière",
+    "roselieres": "roselières", "carriere": "carrière",
+    "carrieres": "carrières", "graviere": "gravière",
+    "sabliere": "sablière", "meandre": "méandre", "meandres": "méandres",
+    "seche": "sèche", "seches": "sèches", "boise": "boisé",
+    "boisee": "boisée", "boises": "boisés", "gite": "gîte", "gites": "gîtes",
+}
+
+#: Sigles à garder en capitales, énumérés plutôt que devinés.
+#:
+#: Une règle de longueur avait été essayée — « tout mot de trois lettres ou
+#: moins en capitales est un sigle ». Elle ne pouvait pas marcher : la fonction
+#: ne traite que des noms **entièrement** en capitales, où rien ne distingue
+#: un sigle d'un mot court. « PELOUSES SECHES DE LA COTE DE BAR » sortait
+#: « de la Cote de BAR », alors que c'est la ville de Bar.
+_SIGLES = {"CEN", "ONF", "PNR", "RNN", "RNR", "RNC", "APB", "APPB", "ZPS",
+           "ZSC", "SIC", "ZNIEFF", "ZICO", "INPG", "ENS", "RD", "RN", "A",
+           "EDF", "SNCF", "LPO", "UNESCO", "CBN", "DREAL", "OFB", "MNHN",
+           "VNF", "CELRL", "SMA", "EPTB"}
+
+#: Caractères qui entourent un mot sans en faire partie.
+_BORDURE = "«»\"'()[].,;:!?…"
+
+
+def _mot_lisible(mot: str, premier: bool) -> str:
+    """Un mot d'un nom, passé des capitales à la casse de lecture.
+
+    L'ordre des tests compte. Le découpage sur les apostrophes et les traits
+    d'union vient **avant** le test du chiffre : « L'A4 » porte un chiffre, et
+    le tester d'abord renvoyait le mot intact — donc « L'A4 » au lieu de
+    « l'A4 ».
     """
-    return str(nom or "").strip()
+    # La ponctuation encadrante se met de côté : sans cela « MARAIS, » ne
+    # s'apparie à aucun nom commun et garde une capitale.
+    tete = ""
+    while mot and mot[0] in _BORDURE:
+        tete, mot = tete + mot[0], mot[1:]
+    queue = ""
+    while mot and mot[-1] in _BORDURE:
+        queue, mot = mot[-1] + queue, mot[:-1]
+    if not mot:
+        return tete + queue
+
+    for separateur in ("'", "\u2019", "-"):
+        if separateur in mot:
+            bouts = mot.split(separateur)
+            # Un nom composé n'est « premier » que par son premier segment,
+            # pour que « CLERMONT-EN-ARGONNE » donne « Clermont-en-Argonne ».
+            recompose = separateur.join(
+                _mot_lisible(bout, premier and rang == 0)
+                for rang, bout in enumerate(bouts)
+            )
+            return tete + recompose + queue
+
+    # Les codes et les immatriculations restent intacts : « A4 », « 903 ».
+    if any(c.isdigit() for c in mot):
+        return tete + mot + queue
+
+    bas = _ACCENTS.get(mot.lower(), mot.lower())
+    if not premier:
+        if bas == "a":
+            return tete + "à" + queue   # « RUISSEAU A FUTEAU » : préposition
+        if bas in _PARTICULES or bas in _COMMUNS:
+            return tete + bas + queue
+    if mot.upper() in _SIGLES:
+        return tete + mot.upper() + queue
+    return tete + bas[:1].upper() + bas[1:] + queue
+
+
+def _abaisser_particules(nom: str) -> str:
+    """Abaisse les particules capitalisées d'un nom déjà en casse mixte.
+
+    Geste chirurgical : seuls les mots de `_PARTICULES` sont touchés, et
+    seulement hors première position. Tout le reste est laissé intact, parce
+    qu'un nom en casse mixte peut être correctement écrit et qu'on n'a aucun
+    moyen de distinguer « Mandallaz » d'un nom commun mal capitalisé.
+
+    Un nom correctement écrit n'a pas de particule capitalisée : la
+    transformation ne peut donc pas l'abîmer.
+    """
+    mots = nom.split()
+    sortie = []
+    for rang, mot in enumerate(mots):
+        tete = ""
+        noyau = mot
+        while noyau and noyau[0] in _BORDURE:
+            tete, noyau = tete + noyau[0], noyau[1:]
+        queue = ""
+        while noyau and noyau[-1] in _BORDURE:
+            queue, noyau = noyau[-1] + queue, noyau[:-1]
+        # « L'Abreuvoir » : seule la particule qui précède l'apostrophe bouge.
+        for separateur in ("'", "\u2019"):
+            if separateur in noyau:
+                avant, _, apres = noyau.partition(separateur)
+                if rang > 0 and avant.lower() in _PARTICULES:
+                    noyau = avant.lower() + separateur + apres
+                break
+        else:
+            if rang > 0 and noyau.lower() in _PARTICULES:
+                noyau = noyau.lower()
+        sortie.append(tete + noyau + queue)
+    return " ".join(sortie)
+
+
+def casse_lisible(nom: str) -> str:
+    """Rend lisible un nom, quelle que soit la casse que la source lui donne.
+
+    Les sources en mêlent quatre, et la couche des espaces protégés les a
+    toutes : « PUITS D'ENFER », « etang de vigneulles », « Ruisseau De
+    L'Abreuvoir » et « Montagne de la Mandallaz ». Seule la dernière est
+    correctement écrite.
+
+    **Tout en capitales, ou tout en minuscules** — la source n'a pas tranché la
+    casse, on la pose : chaque mot prend sa capitale sauf les particules et les
+    noms communs de `_COMMUNS`. Le passage en bas de casse pur avait été essayé
+    et abandonné : il donnait « fleuve la seine » et « la villeneuve-au-
+    chatelot », soit des noms propres décapitalisés — des fautes introduites
+    par l'outil, plus discrètes que les capitales qu'elles remplaçaient.
+    Il reste une imprécision assumée : un nom commun absent de `_COMMUNS` prend
+    une capitale de trop. Coquille visible et corrigeable en un geste, préférée
+    à une faute sur un nom propre.
+
+    **Casse mixte** — la source a tranché, et elle peut avoir raison. On ne
+    touche alors qu'aux particules capitalisées, qui sont une faute certaine :
+    « Ruisseau De L'Abreuvoir » devient « Ruisseau de l'Abreuvoir », tandis que
+    « Montagne de la Mandallaz » ressort intacte.
+    """
+    brut = str(nom or "").strip()
+    lettres = [c for c in brut if c.isalpha()]
+    if not lettres:
+        return brut
+    if any(c.islower() for c in lettres) and any(c.isupper() for c in lettres):
+        return _abaisser_particules(brut)
+    return " ".join(_mot_lisible(mot, rang == 0)
+                    for rang, mot in enumerate(brut.split()))
+
+
+#: Pluriel de chaque type de zonage, écrit à la main.
+#:
+#: Une règle automatique ne tient pas : « ZNIEFF de type I » est invariable,
+#: « Zone Spéciale de Conservation » accorde deux mots, « Parc national » fait
+#: « Parcs nationaux » et « Site Ramsar » garde son nom propre au singulier.
+#: Dix-huit entrées écrites une fois valent mieux qu'un algorithme qui se
+#: trompe sur un cas tous les cinq rapports.
+PLURIELS = {
+    "ZNIEFF de type I": "ZNIEFF de type I",
+    "ZNIEFF de type II": "ZNIEFF de type II",
+    "Zone de Protection Spéciale": "Zones de Protection Spéciale",
+    "Zone Spéciale de Conservation": "Zones Spéciales de Conservation",
+    "Arrêté de protection de biotope": "Arrêtés de protection de biotope",
+    "Arrêté de protection d'habitats": "Arrêtés de protection d'habitats",
+    "Réserve naturelle nationale": "Réserves naturelles nationales",
+    "Réserve naturelle régionale": "Réserves naturelles régionales",
+    "Réserve naturelle de Corse": "Réserves naturelles de Corse",
+    "Réserve biologique dirigée": "Réserves biologiques dirigées",
+    "Réserve biologique intégrale": "Réserves biologiques intégrales",
+    "Parc national (zone cœur)": "Parcs nationaux (zone cœur)",
+    "Parc national (aire d'adhésion)": "Parcs nationaux (aire d'adhésion)",
+    "Parc naturel régional": "Parcs naturels régionaux",
+    "Terrain de Conservatoire d'espaces naturels":
+        "Terrains de Conservatoire d'espaces naturels",
+    "Terrain du Conservatoire du Littoral":
+        "Terrains du Conservatoire du Littoral",
+    "Site Ramsar": "Sites Ramsar",
+    # Déposé par l'équipe, pas issu du registre national : les ENS n'ont pas
+    # de couche nationale fiable (voir sources_locales.py).
+    "Espace Naturel Sensible": "Espaces Naturels Sensibles",
+    "Site d'intérêt géologique (INPG)": "Sites d'intérêt géologique (INPG)",
+}
+
+
+def pluriel(type_libelle: str, nombre: int) -> str:
+    """Le type au nombre voulu — « 2 Zones de Protection Spéciale »."""
+    if nombre <= 1:
+        return type_libelle
+    return PLURIELS.get(type_libelle, type_libelle)
+
+
+#: Le nom scientifique s'arrête au premier mot qui n'est pas une épithète :
+#: une capitale, une parenthèse ou un chiffre ouvre la citation d'auteur.
+_EPITHETE = re.compile(r"^[a-zà-ÿ][a-zà-ÿ-]*$")
+_RANG_INFRA = {"subsp.", "ssp.", "var.", "f.", "cv."}
+
+
+def nom_scientifique_court(cite: str) -> str:
+    """« Achillea millefolium L., 1753 » devient « Achillea millefolium ».
+
+    Les noms cités des fiches ZNIEFF portent leur auteur et sa date, sous des
+    formes qui ne se ramènent pas à une seule expression : « Alnus glutinosa
+    (L.) Gaertn., 1790 », « Baetis Leach, 1815 », « Cordulia aenea (Linnaeus,
+    1758) », « Myotis alcathoe Helversen & Heller, 2001 ». Une première version
+    ne retirait que les auteurs entre parenthèses en fin de chaîne, et laissait
+    donc passer la plupart des cas : le tableau d'une seule ZNIEFF affichait
+    cinquante-six noms suivis de leur bibliographie.
+
+    On s'appuie sur la forme du nom plutôt que sur celle de l'auteur : un genre
+    capitalisé, puis des épithètes en bas de casse. Le premier mot qui n'en est
+    pas une termine le nom.
+    """
+    mots = str(cite or "").strip().split()
+    if not mots:
+        return ""
+    garde = [mots[0]]
+    for mot in mots[1:]:
+        if mot in _RANG_INFRA or _EPITHETE.match(mot):
+            garde.append(mot)
+            continue
+        break
+    return " ".join(garde)
 
 
 def _enrichir_znieff(gdf, chemin: Path):
@@ -350,10 +620,10 @@ def _enrichir_znieff(gdf, chemin: Path):
             continue
         numero = (ligne.get("nm_sffzn") or "").strip()
         groupe = (ligne.get("groupe_taxo") or "").strip() or "Autres"
-        nom = nettoyer_texte(ligne.get("nom_cite") or "", 120)
-        # Le nom cité porte son auteur : « Cordulia aenea (Linnaeus, 1758) ».
-        # Dans un tableau de synthèse, l'auteur encombre sans rien apporter.
-        nom = re.sub(r"\s*\((?:[^()]*\d{4}[^()]*)\)\s*$", "", nom).strip()
+        # Le nom cité porte son auteur et sa date : dans un tableau de
+        # synthèse, la citation encombre sans rien apporter.
+        nom = nom_scientifique_court(
+            nettoyer_texte(ligne.get("nom_cite") or "", 120))
         if numero and nom:
             especes[numero][groupe].add(nom)
 
@@ -368,11 +638,27 @@ def _enrichir_znieff(gdf, chemin: Path):
         """
         if not texte or not nom:
             return texte
-        if normaliser(texte).startswith(normaliser(nom)):
-            reste = texte[len(nom):].lstrip(" :–—-")
-            # On ne garde le raccourci que s'il reste quelque chose à lire.
-            return reste if len(reste) > 20 else texte
-        return texte
+        # Comparaison sur les chaînes brutes, et non sur une forme normalisée :
+        # la position de coupe est une longueur de caractères, donc elle n'a de
+        # sens que si les deux chaînes sont comparées telles quelles. Une
+        # version antérieure comparait les formes normalisées — sans accents ni
+        # ponctuation, donc de longueur différente — puis coupait le texte brut
+        # à la longueur du nom brut. Elle appelait de surcroît un `normaliser`
+        # jamais importé : la fonction levait une NameError dès qu'elle était
+        # atteinte, ce qui faisait échouer toute reconstruction d'extraits.
+        # Le nom et la description viennent de la même fiche : ils portent les
+        # mêmes accents, et la casse seule peut différer.
+        if texte[:len(nom)].casefold() != nom.casefold():
+            return texte
+        reste = texte[len(nom):].lstrip(" :–—-(")
+        reste = reste.rstrip(" )")
+        # Ce qui reste est souvent un simple comptage — « 1 espèce
+        # confidentielle et 56 espèces déterminantes » — qui n'apprend rien
+        # puisque les espèces sont énumérées juste après, dans la même cellule.
+        # Une phrase de description porte au moins un point ; un comptage, non.
+        if "." not in reste:
+            return ""
+        return reste
 
     def _texte(numero: str) -> str:
         fiche = fiches.get(numero) or {}
@@ -380,12 +666,21 @@ def _enrichir_znieff(gdf, chemin: Path):
         bouts = [_sans_repetition(brut, str(fiche.get("LB_ZN") or "").strip())]
         groupes = especes.get(numero)
         if groupes:
+            # L'échantillon se resserre quand une description existe déjà : la
+            # cellule d'un tableau doit rester lisible, et une ZNIEFF de type II
+            # porte parfois deux cents espèces déterminantes. Quand la fiche n'a
+            # pas de description, cette énumération est la seule information
+            # disponible et vaut qu'on lui laisse de la place.
+            avec_description = bool(bouts and bouts[0])
+            max_groupes, max_noms = (3, 4) if avec_description else (5, 6)
             details = []
             for groupe, noms in sorted(groupes.items(), key=lambda x: -len(x[1])):
-                echantillon = sorted(noms)[:6]
-                suite = f" et {len(noms) - 6} autres" if len(noms) > 6 else ""
+                echantillon = sorted(noms)[:max_noms]
+                reste = len(noms) - max_noms
+                suite = f" et {reste} autres" if reste > 0 else ""
                 details.append(f"{groupe} : {', '.join(echantillon)}{suite}")
-            bouts.append("Espèces déterminantes — " + " · ".join(details[:5]) + ".")
+            bouts.append("Espèces déterminantes — "
+                         + " · ".join(details[:max_groupes]) + ".")
         return " ".join(b for b in bouts if b)
 
     gdf["_interet"] = gdf["_id"].map(_texte)
@@ -484,17 +779,90 @@ _TYPES_EP = {
 }
 
 
+def _date_acte(brut) -> str:
+    """Date de l'acte de protection, telle qu'on peut l'affirmer.
+
+    Le champ est rempli à 100 %, mais certaines valeurs sont des années seules
+    complétées au 1ᵉʳ janvier : 56 entités portent « 2007-01-01 », 49
+    « 2017-01-01 », 48 « 2019-01-01 ». Aucun arrêté préfectoral n'est signé un
+    1ᵉʳ janvier à cette fréquence. Pour ces valeurs on ne publie que l'année —
+    écrire « arrêté du 01/01/2007 » affirmerait une précision que la source
+    n'a pas.
+    """
+    texte = str(brut or "").strip()
+    if len(texte) < 10 or texte[:4].isdigit() is False:
+        return ""
+    annee, mois, jour = texte[:4], texte[5:7], texte[8:10]
+    if not (mois.isdigit() and jour.isdigit()):
+        return ""
+    if (mois, jour) == ("01", "01"):
+        return annee
+    return f"{jour}/{mois}/{annee}"
+
+
+def _surface_lisible(brut) -> str:
+    """« 1 240 ha », « 12,4 ha », « 0,8 ha » — l'ordre de grandeur suffit."""
+    try:
+        valeur = float(brut)
+    except (TypeError, ValueError):
+        return ""
+    if valeur <= 0:
+        return ""
+    if valeur >= 100:
+        rendu = f"{valeur:,.0f}".replace(",", "\u202f")
+    elif valeur >= 1:
+        rendu = f"{valeur:.1f}".replace(".", ",")
+    else:
+        rendu = f"{valeur:.2f}".replace(".", ",")
+    return f"{rendu} ha"
+
+
+def _enrichir_ep(gdf, chemin: Path):
+    """Ce qu'on peut dire d'un espace protégé, faute de description.
+
+    La couche n'en porte pas. `objectif_protection` vaut « Nature » sur 8 798
+    des 10 872 entités, `lien_fiche` et `statut` sont vides partout : afficher
+    « Intérêt : Nature » dans un tableau d'état initial ne renseigne personne,
+    et c'est pourquoi la colonne avait d'abord été laissée vide.
+
+    Mais vide sur **toutes** les lignes, elle dépare dans un livrable, alors
+    que la couche porte deux faits que tout prédiagnostic énonce : la date de
+    l'acte qui a créé la protection, et la superficie du site. « Arrêté du
+    21/09/2015 · 1 240 ha » est court, exact et utile.
+    """
+    colonne_date = _premiere_colonne(gdf, ("date_crea_sign",))
+    colonne_surface = _premiere_colonne(gdf, ("superficie_ha",))
+    colonne_gestion = _premiere_colonne(gdf, ("doc_gestion",))
+
+    def _texte(ligne) -> str:
+        bouts = []
+        if colonne_date:
+            date = _date_acte(ligne.get(colonne_date))
+            if date:
+                bouts.append(f"Acte de protection du {date}" if "/" in date
+                             else f"Acte de protection de {date}")
+        if colonne_surface:
+            surface = _surface_lisible(ligne.get(colonne_surface))
+            if surface:
+                bouts.append(surface)
+        if colonne_gestion and str(ligne.get(colonne_gestion)).strip().lower() == "true":
+            bouts.append("document de gestion en vigueur")
+        return " · ".join(bouts)
+
+    gdf = gdf.copy()
+    gdf["_interet"] = gdf.apply(_texte, axis=1)
+    gdf["_nom"] = gdf["_nom"].map(casse_lisible)
+    return gdf
+
+
 def _source_ep(libelle: str, types: tuple[str, ...]) -> SourceZonage:
     return SourceZonage(
         cle="ep_" + libelle.lower().replace(" ", "_")[:24],
         archive="espaces_proteges", motif_shp="sig_metrop.gpkg",
         famille="autres", type_libelle=libelle,
         colonnes_id=("id_mnhn",), colonnes_nom=("nom",),
-        # Pas de colonne descriptive : « objectif_protection » vaut « Nature »
-        # sur la quasi-totalité des entités. Afficher « Intérêt : Nature » dans
-        # un tableau d'état initial ne renseigne personne.
         colonnes_interet=(),
-        enrichir=lambda g, c: g.assign(_nom=g["_nom"].map(casse_lisible)),
+        enrichir=_enrichir_ep,
         filtre_colonne="type_espace", filtre_valeurs=types,
     )
 

@@ -39,7 +39,8 @@ from prediag_enviro import zonages as mod_zonages  # noqa: E402
 from prediag_enviro import cartes as mod_cartes  # noqa: E402
 from prediag_enviro import extraits as mod_extraits  # noqa: E402
 from prediag_enviro import chemins  # noqa: E402
-from prediag_enviro import sortie_word as mod_word  # noqa: E402
+from prediag_enviro import sources_locales as mod_sources  # noqa: E402
+from prediag_enviro import rapport_prediag as mod_prediag  # noqa: E402
 from prediag_enviro.memoire import ACCEPTE, A_REVOIR, DECISIONS, REFUSE  # noqa: E402
 
 #: Le picto de l'outil, devant son titre et dans l'onglet du navigateur : les
@@ -73,7 +74,7 @@ with _col_titre:
     st.title(f"{PICTO} Prédiag environnemental")
     st.caption(
         "Tenue à jour des classeurs de statuts · Recoupement des sources "
-        "d'espèces · Tableaux Word aux conventions UNITe"
+        "d'espèces · Prédiagnostic écologique aux conventions UNITe"
     )
     st.caption(
         "Statuts et taxonomie : référentiels INPN figés, cités avec leur date. "
@@ -128,6 +129,21 @@ def _aires_etude() -> list:
         mod_zonages.AireEtude("AER", "Aire d'étude rapprochée",
                               float(st.session_state.get("rayon_rapprochee", 5000))),
     ]
+
+
+def _nom_fichier(libelle: str) -> str:
+    """Un nom de fichier sûr, tiré du nom des communes.
+
+    Les noms de communes portent apostrophes, accents et virgules — « L'Isle-
+    Adam, Mériel » — dont aucun n'a sa place dans un nom de fichier partagé
+    entre Windows et OneDrive.
+    """
+    import re
+    import unicodedata
+
+    plat = unicodedata.normalize("NFD", libelle).encode("ascii", "ignore").decode()
+    propre = re.sub(r"[^A-Za-z0-9]+", "-", plat).strip("-")
+    return propre[:60] or "prediag"
 
 
 def _dossier_travail() -> Path:
@@ -293,8 +309,10 @@ with onglet_a:
                 "partout. "
                 f"<span style='color:{ORANGE_PARTIEL};font-weight:600'>Orange</span> : "
                 "des listes rouges manquent aussi. Seul le classeur oiseaux est "
-                "dans ce cas — 38 de ses 43 colonnes régionales sont périodisées, "
-                "et BDC ne porte pas la période.",
+                "dans ce cas — 38 de ses 43 colonnes régionales sont "
+                "périodisées. BDC porte bien la période — dans RQ_STATUT pour "
+                "les listes nationales, dans le titre du document cité pour "
+                "les régionales — mais la veille ne l'exploite pas encore.",
                 unsafe_allow_html=True,
             )
 
@@ -499,6 +517,98 @@ with onglet_a:
     )
 
 
+    st.divider()
+    st.subheader("5 · Couches sans source nationale")
+    st.caption(
+        "Les espaces naturels sensibles n'ont pas de couche nationale fiable : "
+        "ils relèvent du Département ou de la région, et la couche nationale de "
+        "l'INPN est diffusée comme « en construction ». Ce que vous trouvez se "
+        "dépose ici une fois, et sert à tous les projets suivants du même "
+        "département."
+    )
+
+    connues = mod_sources.registre()
+    if connues:
+        lignes = [{
+            "Département": departement,
+            "Type": source.type_libelle,
+            "Source": source.libelle,
+            "Lien": source.url,
+            "Consultée le": source.consulte_le,
+            "Couche": "oui" if source.fichier else "—",
+            "Déposée par": source.par,
+        } for departement in sorted(connues) for source in connues[departement]]
+        st.dataframe(pd.DataFrame(lignes), hide_index=True, width="stretch")
+    else:
+        st.caption(
+            "Aucune source enregistrée pour l'instant. Tant qu'un département "
+            "n'en a pas, le prédiagnostic le dit explicitement plutôt que de "
+            "laisser croire qu'il n'y a pas de zonage."
+        )
+
+    with st.form("depot_source_locale"):
+        col_dep, col_type = st.columns(2)
+        with col_dep:
+            departement = st.text_input(
+                "Département", max_chars=3,
+                help="Code INSEE : 76, 2A… Une couche régionale se dépose "
+                     "pour chacun des départements qu'elle couvre.")
+        with col_type:
+            type_libelle = st.selectbox(
+                "Type de zonage",
+                ["Espace Naturel Sensible", "Réserve naturelle régionale",
+                 "Parc naturel régional", "Autre"])
+        libelle = st.text_input(
+            "Intitulé de la source",
+            placeholder="Espaces naturels sensibles du Département de …",
+            help="Ce libellé partira en bibliographie du prédiagnostic.")
+        url = st.text_input("Lien (optionnel)",
+                            placeholder="https://…")
+        couche = st.file_uploader(
+            "Couche (optionnelle)", type=["zip", "geojson", "json", "gpkg", "kml"],
+            help="ZIP d'un shapefile, GeoJSON, GeoPackage ou KML. Sans couche, "
+                 "la source est seulement citée en bibliographie — utile quand "
+                 "vous avez consulté un visualiseur sans export.")
+        avertissement = st.text_input(
+            "Avertissement (optionnel)",
+            placeholder="couche en construction, non exhaustive…",
+            help="S'affichera dans le prédiagnostic sous le tableau. À "
+                 "renseigner dès que la source se sait incomplète.")
+        enregistrer = st.form_submit_button("Enregistrer la source",
+                                            type="primary")
+
+    if enregistrer:
+        if not departement.strip() or not libelle.strip():
+            st.warning("Le département et l'intitulé sont nécessaires : sans "
+                       "eux la source ne pourrait être ni retrouvée ni citée.")
+        else:
+            try:
+                if couche is not None:
+                    source = mod_sources.deposer(
+                        _deposer(couche), departement=departement.strip(),
+                        type_libelle=type_libelle, libelle=libelle.strip(),
+                        url=url.strip())
+                else:
+                    source = mod_sources.Source(
+                        departement=departement.strip(),
+                        type_libelle=type_libelle, libelle=libelle.strip(),
+                        url=url.strip())
+                    mod_sources.enregistrer(source)
+                if avertissement.strip():
+                    source.avertissement = avertissement.strip()
+                    mod_sources.enregistrer(source)
+                st.success(
+                    f"{source.type_libelle} · {source.libelle} enregistrée "
+                    f"pour le {source.departement}."
+                    + (" La couche sera croisée avec l'emprise des prochains "
+                       "projets de ce département." if source.fichier else
+                       " Sans couche, elle sera citée en bibliographie.")
+                )
+                st.rerun()
+            except Exception as erreur:  # noqa: BLE001
+                st.error(f"Dépôt impossible : {erreur}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  VOLET B — Prédiag
 # ══════════════════════════════════════════════════════════════════════════════
@@ -688,11 +798,13 @@ with onglet_b:
                     },
                 )
             st.caption(
-                "Les noms sont rendus tels que les référentiels les portent, "
-                "capitales comprises : les passer en casse normale "
-                "décapitaliserait des noms propres — « fleuve la seine » — soit "
-                "une faute ajoutée par l'outil, plus discrète que la laideur "
-                "qu'elle remplace."
+                "Les noms que les référentiels portent tout en capitales sont "
+                "remis en casse de lecture — « FORET D'ARGONNE AU NORD DE L'A4 » "
+                "devient « Forêt d'Argonne au nord de l'A4 ». Les particules et "
+                "les noms communs de géographie passent en bas de casse, le "
+                "reste garde sa capitale ; un nom commun rare peut donc en "
+                "prendre une de trop. Les noms déjà écrits en casse mixte ne "
+                "sont jamais retouchés."
             )
 
             st.markdown("**Cartes**")
@@ -851,115 +963,104 @@ with onglet_b:
                     )
 
         st.divider()
-        st.subheader("7 · Documents Word")
+        st.subheader("7 · Prédiagnostic")
         st.caption(
-            "Les tableaux mis en forme aux conventions UNITe, prêts à coller "
-            "dans l'étude : en-têtes « Titre colonne », corps « Corps de texte "
-            "- Unite », noms latins en italique, dates centrées."
+            "Le document complet, dans la forme du prédiagnostic interne : "
+            "page de garde, sommaires, zone d'étude, patrimoine naturel, zones "
+            "humides, espèces par groupe et conclusion. Il reprend l'en-tête, "
+            "le pied de page paginé et les styles du modèle UNITe. Ce que "
+            "l'outil sait établir y est écrit — dénombrements, distances, "
+            "statuts, cartes ; ce qui relève de l'expertise est laissé en "
+            "couleur, avec à chaque fois la consigne de ce qu'on attend."
         )
 
         resultat_especes = st.session_state.get("recoupement")
         resultat_zonages = st.session_state.get("zonages")
-        if resultat_zonages is None and resultat_especes is None:
+        cartes_produites = st.session_state.get("cartes") or []
+
+        manques = []
+        if resultat_zonages is None:
+            manques.append("le patrimoine naturel (section 4)")
+        elif not cartes_produites:
+            manques.append("les cartes (section 4)")
+        if resultat_especes is None or not resultat_especes.especes:
+            manques.append("les espèces (sections 5 et 6)")
+        if manques:
             st.caption(
-                "Rien à mettre en forme pour l'instant : croisez les zonages "
-                "(section 4) ou recoupez des sources d'espèces (section 5)."
+                "À ce stade, le document sortira avec une consigne à la place "
+                "de " + ", ".join(manques) + ". C'est volontaire : un "
+                "prédiagnostic se construit par allers-retours, et refuser de "
+                "produire obligerait à tout faire dans l'ordre."
             )
-        else:
-            col_mod, col_gen = st.columns([2, 1], gap="large")
-            with col_mod:
-                modele = st.file_uploader(
-                    "Modèle de mise en forme (optionnel)", type=["docx"],
-                    help="N'importe quel document UNITe : seuls ses styles sont "
-                         "repris (« Titre colonne », « Corps de texte - Unite »). "
-                         "Sans modèle, les styles sont recréés à l'approchant.",
-                )
-            with col_gen:
-                st.write("")
-                generer = st.button("Générer le document", type="primary",
-                                    width="stretch")
 
-            if generer:
-                chemin_modele = _deposer(modele) if modele is not None else None
-                communes_libelle = (", ".join(c.nom for c in decoupage.retenues)
-                                    or "la zone d'étude")
-                blocs = []
-                mentions = []
+        col_mod, col_gen = st.columns([2, 1], gap="large")
+        with col_mod:
+            modele = st.file_uploader(
+                "Autre modèle de mise en forme (optionnel)", type=["docx"],
+                help="L'outil est livré avec son modèle : en-tête au logo, "
+                     "pied de page paginé, marges et styles maison. Déposez un "
+                     "document ici seulement pour en employer un autre — seuls "
+                     "ses styles, son en-tête et son pied de page sont repris, "
+                     "jamais son contenu.",
+            )
+        with col_gen:
+            st.write("")
+            generer = st.button("Générer le prédiagnostic", type="primary",
+                                width="stretch")
 
-                # Les zonages d'abord : c'est l'ordre de l'état initial, et le
-                # contexte réglementaire se pose avant les espèces.
-                if resultat_zonages is not None:
-                    colonnes_z = mod_word.colonnes_zonages()
-                    # Chaque carte suit le tableau qu'elle illustre, comme dans
-                    # le document de référence.
-                    par_famille_carte = {c.famille: c
-                                         for c in (st.session_state.get("cartes") or [])}
-                    for famille, titre in mod_zonages.FAMILLES:
-                        trouves = resultat_zonages.par_famille(famille)
-                        if not trouves:
-                            continue
-                        carte = par_famille_carte.get(famille)
-                        blocs.append((titre, colonnes_z, [{
-                            "nom": z.nom,
-                            "distance": z.distance_lisible,
-                            "identifiant": z.identifiant,
-                            "interet": z.interet,
-                            "aires": ", ".join(z.aires),
-                        } for z in trouves],
-                            f"Tableau : {titre.lower()} dans les aires d'étude",
-                            carte.chemin if carte else None,
-                            f"Carte : {titre.lower()} autour de la ZIP" if carte else ""))
-                    _, citations_z = service.preparer_zonages(RACINE)
-                    mentions += ["Zonages : " + " · ".join(citations_z)]
-                    if not par_famille_carte:
-                        st.info(
-                            "Document produit sans les cartes : revenez en "
-                            "section 4 et cliquez « Produire les cartes »."
-                        )
-                    else:
-                        mentions += ["Fond de carte : "
-                                     + mod_cartes.FOND["attribution"]]
+        if generer:
+            chemin_modele = _deposer(modele) if modele is not None else None
+            citations: list[str] = []
+            contexte = None
 
-                if resultat_especes is not None and resultat_especes.especes:
-                    colonnes_e = mod_word.colonnes_especes([])
-                    par_groupe: dict[str, list[dict]] = {}
-                    for espece in resultat_especes.especes:
-                        par_groupe.setdefault(espece.groupe, []).append({
-                            "nom_commun": espece.nom_commun,
-                            "nom_scientifique": espece.nom_scientifique,
-                            "nidification": espece.nidification,
-                            "date_obs": espece.date_obs,
-                        })
-                    blocs += [
-                        (groupe.capitalize(), colonnes_e, lignes,
-                         f"Tableau : espèces de {groupe} recensées sur "
-                         f"{communes_libelle}")
-                        for groupe, lignes in par_groupe.items()
-                    ]
-                    mentions += [
-                        "Sources d'espèces : " + ", ".join(sorted({
-                            s for e in resultat_especes.especes for s in e.sources})),
-                        "Statuts et taxonomie : " + " · ".join(_contexte().citations),
-                    ]
+            if resultat_zonages is not None:
+                _, citations_zonages = service.preparer_zonages(RACINE)
+                citations += citations_zonages
+            if cartes_produites:
+                citations.append("Fond de carte : "
+                                 + mod_cartes.FOND["attribution"])
+            if resultat_especes is not None and resultat_especes.especes:
+                # Les référentiels d'espèces pèsent plusieurs minutes au
+                # premier chargement : on ne les demande que si le document
+                # en a l'usage.
+                contexte = _contexte()
+                citations += list(contexte.citations)
 
-                sortie = _dossier_travail() / "etat_initial.docx"
-                _, recrees = mod_word.ecrire_document(
-                    sortie, f"État initial — {communes_libelle}", blocs,
-                    modele=chemin_modele, mentions=mentions,
+            nom_projet = (", ".join(c.nom for c in decoupage.retenues)
+                          or "la zone d'étude")
+            projet = mod_prediag.Projet(
+                nom=nom_projet, communes=decoupage.retenues,
+                departements=departements, surface_ha=emprise.surface_ha,
+                aires=_aires_etude(),
+            )
+            sortie = _dossier_travail() / f"Prediag_{_nom_fichier(nom_projet)}.docx"
+            with st.spinner("Assemblage du document…"):
+                _, recrees = mod_prediag.ecrire(
+                    sortie, projet,
+                    resultat_zonages=resultat_zonages,
+                    cartes=cartes_produites,
+                    resultat_especes=resultat_especes,
+                    contexte=contexte,
+                    citations=citations,
+                    modele=chemin_modele,
                 )
-                if recrees:
-                    st.warning(
-                        "Styles absents du modèle, recréés à l'approchant : "
-                        + ", ".join(recrees)
-                        + ". Déposez un document UNITe pour une mise en forme fidèle."
-                    )
-                st.download_button(
-                    "⬇️ Télécharger les tableaux", sortie.read_bytes(),
-                    file_name=sortie.name, width="stretch",
-                    mime="application/vnd.openxmlformats-officedocument"
-                         ".wordprocessingml.document",
+            if recrees:
+                st.warning(
+                    "Styles absents du modèle, recréés à l'approchant : "
+                    + ", ".join(recrees)
+                    + ". Déposez un document UNITe pour une mise en forme "
+                    "fidèle."
                 )
-                st.caption(
-                    f"{len(blocs)} tableau(x). Les sources et leurs dates sont "
-                    "reportées en pied de document — la Licence Ouverte l'exige."
-                )
+            st.download_button(
+                "⬇️ Télécharger le prédiagnostic", sortie.read_bytes(),
+                file_name=sortie.name, width="stretch",
+                mime="application/vnd.openxmlformats-officedocument"
+                     ".wordprocessingml.document",
+            )
+            st.caption(
+                "Les passages en couleur du document signalent ce qui reste à "
+                "compléter. À la première ouverture, Word met les sommaires à "
+                "jour ; si ce n'est pas le cas, Ctrl+A puis F9. Les sources et "
+                "leurs dates sont reportées en fin de document — la Licence "
+                "Ouverte l'exige."
+            )

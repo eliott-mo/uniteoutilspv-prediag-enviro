@@ -38,7 +38,7 @@ from pathlib import Path
 csv.field_size_limit(10 ** 7)
 
 #: Change à chaque modification de la forme sérialisée (invalide les caches).
-_FORMAT_CACHE = 2
+_FORMAT_CACHE = 4
 
 # Groupes INPN (GROUP2_INPN) admis pour chaque classeur B-Statuts.
 GROUPES_INPN: dict[str, set[str]] = {
@@ -73,7 +73,16 @@ class Taxon:
     lb_nom: str          # nom scientifique porté par ce cd_nom
     nom_valide: str      # nom scientifique du cd_ref
     rang: str            # ES, SSES, GN…
-    groupe: str          # GROUP2_INPN
+    groupe: str          # GROUP2_INPN — Oiseaux, Mammifères, Insectes…
+    #: GROUP3_INPN — Odonates, Orthoptères, Lépidoptères, Araignées… Il
+    #: porte le découpage qu'emploient les prédiagnostics, là où
+    #: GROUP2_INPN range odonates, papillons et orthoptères sous un seul
+    #: « Insectes ». Vaut « Autres » quand il n'apporte rien.
+    groupe3: str = ""
+    #: ORDRE taxonomique. Seul moyen d'isoler les chiroptères : `GROUP2_INPN`
+    #: les range sous « Mammifères » et `GROUP3_INPN` sous « Autres », alors
+    #: que le prédiagnostic externe leur consacre une section entière.
+    ordre: str = ""
     nom_vern: str = ""   # nom français de référence, pour les tableaux d'étude
 
     @property
@@ -136,6 +145,8 @@ class Index:
                     nom_valide=(ligne["NOM_VALIDE"] or "").strip(),
                     rang=(ligne["RANG"] or "").strip(),
                     groupe=(ligne["GROUP2_INPN"] or "").strip(),
+                    groupe3=(ligne["GROUP3_INPN"] or "").strip(),
+                    ordre=(ligne["ORDRE"] or "").strip(),
                     nom_vern=str(ligne["NOM_VERN"] or "").split(",")[0].strip(),
                 )
                 forme = normaliser(ligne["LB_NOM"])

@@ -246,6 +246,14 @@ def croiser(emprise_union, departements: list[str], sortie: Path,
     tout["_d"] = tout.geometry.distance(emprise_union)
     retenus = tout[tout["_d"] <= portee].sort_values("_d")
 
+    # La casse de lecture s'applique ici et non à la construction : c'est de
+    # la présentation, et la figer dans les extraits obligerait à les
+    # reconstruire — trente-six minutes — pour changer une capitale. La
+    # fonction ne touche que les noms entièrement en capitales, donc
+    # l'appliquer à un extrait déjà traité ne fait rien.
+    retenus = retenus.copy()
+    retenus["_nom"] = retenus["_nom"].map(mod_zonages.casse_lisible)
+
     for type_libelle, groupe in retenus.groupby("_type", sort=False):
         res.geometries[str(type_libelle)] = groupe[["_nom", "_id", "geometry"]]
         for _, ligne in groupe.iterrows():

@@ -54,13 +54,21 @@ CODE = [
     "README.md",
     "src",
     "config",
+    # Le modèle Word : en-tête au logo, pied de page paginé, styles maison.
+    # Sans lui, le prédiagnostic sort avec des styles recréés à l'approchant,
+    # c'est-à-dire un document qui ne ressemble à rien de ce que l'équipe
+    # produit.
+    "modele",
+    # Le script qui refabrique le modèle : sans lui, personne ne saurait
+    # comment il a été produit le jour où la charte change.
+    "outils",
 ]
 
 #: Données : copiées uniquement à la première mise en place, et jamais
 #: écrasées. `alias/` contient ce que l'équipe a appris des noms d'espèces —
 #: l'écraser depuis un dossier de développement effacerait le travail de
 #: plusieurs personnes.
-DONNEES = ["classeurs", "extraits", "alias"]
+DONNEES = ["classeurs", "extraits", "alias", "sources_locales"]
 
 #: Jamais publié : dépôt git, caches, environnements, fichiers de travail.
 EXCLUS = {".git", "__pycache__", ".venv", "venv", ".pytest_cache", ".claude"}
