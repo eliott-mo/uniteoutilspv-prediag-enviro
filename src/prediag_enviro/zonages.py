@@ -28,7 +28,7 @@ from pathlib import Path
 import geopandas as gpd
 
 from . import archives
-from .taxref import cle_alphabetique
+from .taxref import cle_alphabetique, nom_vernaculaire
 
 CRS_METRIQUE = 2154
 
@@ -326,10 +326,27 @@ def nettoyer_texte(brut: str, limite: int = 900) -> str:
             # Ouvrant sans fermant : rien à préserver.
             texte = texte[1:].lstrip()
         # Sinon le rédacteur cite un passage précis : ses guillemets restent.
+    # Quelques fiches débutent sur un fragment orphelin, reste d'un intertitre
+    # avalé à la saisie : « le climat Dans le contexte nord atlantique de la
+    # Haute Normandie… » pour la ZSC FR2300125. On repart à la première
+    # majuscule, et seulement si elle vient tôt — au-delà, c'est du texte
+    # légitime qu'on amputerait.
+    if texte[:1].islower():
+        debut = re.search(r"\s([A-ZÀÂÉÈÊÎÔÙÛÇ])", texte[:60])
+        if debut:
+            texte = texte[debut.start() + 1:]
+
     if len(texte) <= limite:
         return texte
     coupe = _fin_de_phrase(texte[:limite])
-    return (coupe + ".") if len(coupe) > limite * 0.5 else texte[:limite].rstrip() + "…"
+    if len(coupe) > limite * 0.5:
+        return coupe + "."
+    # Faute de phrase complete, on coupe au dernier mot entier : tailler en
+    # plein milieu d'un libelle — « (* sites d'orchidées rema… » — se voit.
+    brut = texte[:limite].rstrip()
+    if " " in brut:
+        brut = brut.rsplit(" ", 1)[0].rstrip(" ,;:(")
+    return brut + "…"
 
 
 #: Abréviations qui se terminent par un point sans terminer une phrase.
@@ -822,17 +839,152 @@ def _enrichir_znieff(gdf, chemin: Path):
     return gdf
 
 
+#: Groupes taxonomiques du formulaire standard de donnees, en clair.
+_GROUPES_FSD = {
+    "B": "Oiseaux", "M": "Mammifères", "A": "Amphibiens", "R": "Reptiles",
+    "F": "Poissons", "I": "Invertébrés", "P": "Plantes", "X": "Autres",
+}
+
+#: Au-dela, on donne le compte et un echantillon plutot que la liste entiere.
+#: C'est la forme qu'emploie le prediagnostic de reference : « la presence de
+#: 37 especes d'oiseaux inscrites a l'Annexe I ... dont : ... ».
+MAX_ESPECES_N2000 = 8
+
+#: cd_ref inscrits a l'annexe II de la directive Habitats, lus une fois.
+_ANNEXE_II: set[str] | None = None
+
+
+def _annexe_ii() -> set[str]:
+    """Les cd_ref inscrits à l'annexe II de la directive Habitats.
+
+    Le champ `annexe_ii` de `species.csv` ne peut pas servir : il est vide
+    pour les quatre chiroptères de la ZSC FR2300125 — Grand Murin, Grand
+    rhinolophe, Vespertilion de Bechstein et Vespertilion à oreilles
+    échancrées — qui y sont pourtant tous inscrits, et qui motivent la
+    désignation du site. S'y fier aurait effacé l'essentiel.
+
+    BDC-Statuts porte l'information proprement, sous le type `DH` et le code
+    `CDH2`. Absente, on rend un ensemble vide : la description se contentera
+    alors de nommer les espèces sans annoncer leur annexe.
+    """
+    global _ANNEXE_II
+    if _ANNEXE_II is not None:
+        return _ANNEXE_II
+    _ANNEXE_II = set()
+    import csv
+    import io as _io
+    import zipfile
+
+    from . import chemins
+
+    archive = chemins.referentiels() / "BDC.zip"
+    if not archive.exists():
+        return _ANNEXE_II
+    try:
+        with zipfile.ZipFile(archive) as paquet:
+            membres = [n for n in paquet.namelist()
+                       if n.endswith(".csv") and "bdc_" in n.rsplit("/", 1)[-1]]
+            if not membres:
+                return _ANNEXE_II
+            with paquet.open(membres[0]) as flux:
+                lecteur = csv.DictReader(
+                    _io.TextIOWrapper(flux, encoding="utf-8", errors="replace"),
+                    delimiter=",", quotechar='"')
+                for ligne in lecteur:
+                    if (ligne.get("CD_TYPE_STATUT") or "") != "DH":
+                        continue
+                    if "2" in str(ligne.get("CODE_STATUT") or ""):
+                        _ANNEXE_II.add(str(ligne.get("CD_REF") or "").strip())
+    except Exception:  # noqa: BLE001
+        _ANNEXE_II = set()
+    return _ANNEXE_II
+
+
 def _enrichir_natura(gdf, chemin: Path):
-    """Nom du site et caractérisation : le shapefile ne porte que le code."""
+    """Nom du site, milieux, et ce qui a motivé la désignation.
+
+    La version précédente recopiait les champs `charact` et `quality` du
+    formulaire standard : de la géomorphologie et du climat sur six cents
+    caractères. La responsable environnement a tranché — « pour les zonages
+    NATURA 2000 aucun n'est bon ».
+
+    Ce qui compte pour un prédiagnostic, c'est ce qui a motivé la
+    désignation : les espèces d'annexe et les habitats d'intérêt
+    communautaire. On reprend la forme de son propre livrable :
+
+        La création de cette ZPS a été motivée par la présence de 37 espèces
+        d'oiseaux inscrites à l'Annexe I de la directive Oiseaux dont : …
+    """
+    from collections import defaultdict
+
     sites = archives.lire_csv(chemin, "biotop.csv",
-                              colonnes=["sitecode", "site_name", "cd_sig"],
+                              colonnes=["sitecode", "site_name", "cd_sig", "type"],
                               cle="cd_sig")
     commentaires = archives.lire_csv(chemin, "commentaire.csv",
-                                     colonnes=["sitecode", "charact", "quality"],
+                                     colonnes=["sitecode", "charact"],
                                      cle="sitecode")
+    habitats_ref = archives.lire_csv(
+        chemin, "dhff_habitats.csv",
+        colonnes=["cd_ue", "lb_habdh_fr", "prioritaire"], cle="cd_ue")
+    oiseaux_ref = archives.lire_csv(
+        chemin, "code_do_oiseaux.csv",
+        colonnes=["code_n2000", "nom_vern", "annexe_i", "cd_ref"],
+        cle="code_n2000")
+    autres_ref = archives.lire_csv(
+        chemin, "code_especes_annexe.csv",
+        colonnes=["code_n2000", "nom_vern", "nom", "cd_ref"], cle="code_n2000")
 
-    def _nom(cd_sig: str) -> str:
-        return (sites.get(cd_sig) or {}).get("site_name", "")
+    annexe2 = _annexe_ii()
+    francais = _noms_francais()
+
+    # {sitecode: {groupe: {"annexe": set, "autre": set}}}
+    especes: dict[str, dict[str, dict[str, set]]] = defaultdict(
+        lambda: defaultdict(lambda: {"annexe": set(), "autre": set()}))
+    for ligne in archives.lire_csv(chemin, "species.csv",
+                                   colonnes=["sitecode", "code_n2000",
+                                             "cd_ref", "taxgroup"]):
+        site = (ligne.get("sitecode") or "").strip()
+        if not site:
+            continue
+        code = (ligne.get("code_n2000") or "").strip()
+        cd_ref = (ligne.get("cd_ref") or "").strip()
+        groupe = _GROUPES_FSD.get((ligne.get("taxgroup") or "").strip().upper(),
+                                  "Autres")
+        fiche = oiseaux_ref.get(code) or autres_ref.get(code) or {}
+        # `nom_vern` peut porter plusieurs noms separes par des virgules —
+        # « Combattant varié, Chevalier combattant » pour Calidris pugnax —
+        # et l'article final de TaxRef. `nom_vernaculaire` tranche les deux.
+        nom = (nom_vernaculaire(nettoyer_texte(fiche.get("nom_vern") or "", 90))
+               or francais.get(cd_ref)
+               or nom_scientifique_court(
+                   nettoyer_texte(fiche.get("nom") or "", 90)))
+        if not nom:
+            continue
+        # Oiseaux : l'annexe I de la directive Oiseaux, donnée par la table de
+        # référence. Les autres : l'annexe II de la directive Habitats, qu'il
+        # faut aller chercher dans BDC.
+        if groupe == "Oiseaux":
+            inscrite = str(fiche.get("annexe_i") or "").strip().upper() == "Y"
+        else:
+            inscrite = cd_ref in annexe2
+        especes[site][groupe]["annexe" if inscrite else "autre"].add(nom)
+
+    habitats: dict[str, set] = defaultdict(set)
+    for ligne in archives.lire_csv(chemin, "habit1.csv",
+                                   colonnes=["sitecode", "cd_ue"]):
+        site = (ligne.get("sitecode") or "").strip()
+        fiche = habitats_ref.get((ligne.get("cd_ue") or "").strip()) or {}
+        libelle = nettoyer_texte(fiche.get("lb_habdh_fr") or "", 120)
+        if site and libelle:
+            prioritaire = str(fiche.get("prioritaire") or "").lower() == "true"
+            habitats[site].add(libelle + (" (prioritaire)" if prioritaire else ""))
+
+    def _enumere(noms: set) -> tuple[str, int]:
+        """Les noms, triés, échantillonnés s'ils sont trop nombreux."""
+        ranges = sorted(noms, key=cle_alphabetique)
+        if len(ranges) <= MAX_ESPECES_N2000:
+            return ", ".join(ranges), len(ranges)
+        return ", ".join(ranges[:MAX_ESPECES_N2000]), len(ranges)
 
     def _code(cd_sig: str) -> str:
         # cd_sig vaut « I098FR5312003 » : le code du site en est la fin.
@@ -842,11 +994,62 @@ def _enrichir_natura(gdf, chemin: Path):
         trouve = re.search(r"(FR\d{7,})", str(cd_sig))
         return trouve.group(1) if trouve else str(cd_sig)
 
+    def _nom(cd_sig: str) -> str:
+        return (sites.get(cd_sig) or {}).get("site_name", "")
+
     def _texte(cd_sig: str) -> str:
-        fiche = commentaires.get(_code(cd_sig)) or {}
-        bouts = [nettoyer_texte(fiche.get("charact") or "", 600),
-                 nettoyer_texte(fiche.get("quality") or "", 500)]
-        return " ".join(b for b in bouts if b)
+        site = _code(cd_sig)
+        fiche_site = sites.get(cd_sig) or {}
+        # Type A : ZPS, directive Oiseaux. Type B : ZSC ou SIC, Habitats.
+        zps = str(fiche_site.get("type") or "").strip().upper() == "A"
+        sigle, annexe, directive = (("ZPS", "I", "Oiseaux") if zps
+                                    else ("ZSC", "II", "Habitats"))
+
+        bouts = []
+        milieu = nettoyer_texte(
+            (commentaires.get(site) or {}).get("charact") or "", 300)
+        if milieu:
+            bouts.append(milieu)
+
+        groupes = especes.get(site) or {}
+        inscrites = {g: d["annexe"] for g, d in groupes.items() if d["annexe"]}
+        total = sum(len(v) for v in inscrites.values())
+        if total:
+            lignes = []
+            for groupe, noms in sorted(inscrites.items(),
+                                       key=lambda x: -len(x[1])):
+                liste, combien = _enumere(noms)
+                # « dont : » quand la liste est échantillonnée, c'est le mot
+                # qu'emploie le prédiagnostic de référence.
+                jonction = ", dont :" if combien > MAX_ESPECES_N2000 else " :"
+                lignes.append(f"· {groupe} ({combien}){jonction} {liste}")
+            bouts.append(
+                f"La création de cette {sigle} a été motivée par la présence "
+                f"de {total} espèce{'s' if total > 1 else ''} inscrite"
+                f"{'s' if total > 1 else ''} à l'Annexe {annexe} de la "
+                f"directive {directive}.\n" + "\n".join(lignes))
+        elif groupes:
+            bouts.append(f"Aucune espèce inscrite à l'Annexe {annexe} de la "
+                         f"directive {directive} n'est recensée sur ce site.")
+
+        autres = {g: d["autre"] for g, d in groupes.items() if d["autre"]}
+        if autres:
+            lignes = []
+            for groupe, noms in sorted(autres.items(), key=lambda x: -len(x[1])):
+                liste, combien = _enumere(noms)
+                # « dont : » quand la liste est échantillonnée, c'est le mot
+                # qu'emploie le prédiagnostic de référence.
+                jonction = ", dont :" if combien > MAX_ESPECES_N2000 else " :"
+                lignes.append(f"· {groupe} ({combien}){jonction} {liste}")
+            bouts.append("Autres espèces recensées, hors annexe\n"
+                         + "\n".join(lignes))
+
+        milieux = habitats.get(site)
+        if milieux:
+            liste = sorted(milieux, key=cle_alphabetique)
+            bouts.append(f"Habitats d'intérêt communautaire ({len(liste)}) : "
+                         + " · ".join(liste))
+        return "\n".join(bouts)
 
     gdf["_nom"] = gdf["_id"].map(_nom)
     gdf["_interet"] = gdf["_id"].map(_texte)
