@@ -37,6 +37,7 @@ from pathlib import Path
 
 from . import chemins, statuts_especes as se, zonages as mod_zonages
 from .sortie_word import Colonne, Rapport, colonnes_zonages
+from .taxref import cle_alphabetique, nom_vernaculaire
 
 
 @dataclass
@@ -71,17 +72,12 @@ class Projet:
 #: Article que TaxRef repousse en fin de nom vernaculaire pour que ses listes
 #: se trient alphabétiquement : « Alyte accoucheur (L') », « Crapaud calamite
 #: (Le) ».
-_ARTICLE_FINAL = re.compile(r"\s*\((?:[LlDd]'|[Ll]es?|[Ll]a|[Dd]es?|[Dd]u)\)\s*$")
+#: `nom_vernaculaire` et `cle_alphabetique` vivent dans `taxref` : la
+#: construction des extraits en a besoin elle aussi, et `zonages` ne peut pas
+#: importer ce module-ci sans boucler.
 
 
-def nom_vernaculaire(brut: str) -> str:
-    """Le nom français tel qu'il s'écrit dans un tableau.
 
-    TaxRef renvoie l'article en fin de nom — « Alyte accoucheur (L') ». C'est
-    une convention de classement, pas une façon d'écrire : les tableaux de
-    prédiagnostic portent « Alyte accoucheur ».
-    """
-    return _ARTICLE_FINAL.sub("", str(brut or "").strip())
 
 
 def _enumerer(elements: list[str]) -> str:
@@ -410,8 +406,9 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
 
     def _cle_tri(espece) -> str:
         taxon = index.taxons.get(espece.cd_ref)
-        return nom_vernaculaire((taxon.nom_vern if taxon else "")
-                                or espece.nom_commun or espece.nom_scientifique)
+        return cle_alphabetique(nom_vernaculaire(
+            (taxon.nom_vern if taxon else "")
+            or espece.nom_commun or espece.nom_scientifique))
 
     lignes = []
     for espece in sorted(retenues, key=_cle_tri):
@@ -712,7 +709,7 @@ def _especes_a_pna(resultat, contexte) -> list[str]:
             or espece.nom_scientifique)
         if nom and nom not in noms:
             noms.append(nom)
-    return sorted(noms)
+    return sorted(noms, key=cle_alphabetique)
 
 
 def _page_de_garde(rapport: Rapport, projet: Projet) -> None:

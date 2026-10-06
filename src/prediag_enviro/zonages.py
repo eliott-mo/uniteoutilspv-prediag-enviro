@@ -28,6 +28,7 @@ from pathlib import Path
 import geopandas as gpd
 
 from . import archives
+from .taxref import cle_alphabetique
 
 CRS_METRIQUE = 2154
 
@@ -327,8 +328,34 @@ def nettoyer_texte(brut: str, limite: int = 900) -> str:
         # Sinon le rédacteur cite un passage précis : ses guillemets restent.
     if len(texte) <= limite:
         return texte
-    coupe = texte[:limite].rsplit(". ", 1)[0]
+    coupe = _fin_de_phrase(texte[:limite])
     return (coupe + ".") if len(coupe) > limite * 0.5 else texte[:limite].rstrip() + "…"
+
+
+#: Abréviations qui se terminent par un point sans terminer une phrase.
+#: Sans cette liste, « ... la Gesse des montagnes ( Lathyrus linifolius var. »
+#: passait pour une phrase complète et la description s'arrêtait en plein nom
+#: d'espèce, ce qui se voit dans un livrable.
+_ABREVIATIONS = {"var", "subsp", "ssp", "sp", "spp", "cf", "env", "st", "ste",
+                 "av", "ap", "fig", "n", "no", "cm", "km", "ha", "max", "min",
+                 "etc", "ex", "cad"}
+
+
+def _fin_de_phrase(texte: str) -> str:
+    """Le plus long préfixe de `texte` qui s'achève sur une vraie phrase.
+
+    On recule tant que le point rencontré appartient à une abréviation.
+    Renvoie une chaîne vide si aucune phrase complète ne tient.
+    """
+    reste = texte
+    while True:
+        coupe = reste.rsplit(". ", 1)[0]
+        if coupe == reste:
+            return ""
+        dernier = coupe.rsplit(" ", 1)[-1].strip("(),;:«»\"'").casefold()
+        if dernier not in _ABREVIATIONS:
+            return coupe
+        reste = coupe
 
 
 #: Particules qui restent en bas de casse à l'intérieur d'un nom.
@@ -600,6 +627,66 @@ def nom_scientifique_court(cite: str) -> str:
     return " ".join(garde)
 
 
+#: Nombre d'exemples cités pour un groupe sans espèce déterminante. Quatre
+#: suffisent à dire ce qu'on y trouve sans refaire un pavé.
+MAX_EXEMPLES = 4
+
+#: cd_ref -> nom français, lu une seule fois. Construit paresseusement : la
+#: plupart des usages de ce module n'en ont pas besoin.
+_NOMS_FR: dict[str, str] | None = None
+
+
+def _noms_francais() -> dict[str, str]:
+    """Les noms vernaculaires de TaxRef, par cd_ref.
+
+    La responsable environnement a demandé des noms français plutôt que des
+    noms scientifiques dans les descriptions de zonages. Les fiches ZNIEFF ne
+    portent que le latin, mais elles donnent le `cd_ref` : la jointure est
+    directe, sans appariement de chaînes.
+
+    La construction des extraits ne reçoit pas le contexte de l'application :
+    on va donc chercher l'archive là où elle vit. Si elle manque, on rend un
+    dictionnaire vide et les noms scientifiques servent de repli — mieux vaut
+    une description en latin qu'une reconstruction qui échoue.
+    """
+    global _NOMS_FR
+    if _NOMS_FR is not None:
+        return _NOMS_FR
+    _NOMS_FR = {}
+    import csv
+    import io as _io
+    import zipfile
+
+    from . import chemins
+    from .taxref import nom_vernaculaire
+
+    archive = chemins.referentiels() / "TAXREF.zip"
+    if not archive.exists():
+        return _NOMS_FR
+    try:
+        with zipfile.ZipFile(archive) as paquet:
+            membres = [n for n in paquet.namelist()
+                       if re.fullmatch(r"TAXREFv\d+\.txt",
+                                       n.rsplit("/", 1)[-1])]
+            if not membres:
+                return _NOMS_FR
+            with paquet.open(membres[0]) as flux:
+                lecteur = csv.DictReader(
+                    _io.TextIOWrapper(flux, encoding="utf-8", errors="replace"),
+                    delimiter="\t")
+                for ligne in lecteur:
+                    # Seul le taxon de référence nous intéresse : les synonymes
+                    # pointent vers lui et porteraient le même nom français.
+                    if ligne.get("CD_NOM") != ligne.get("CD_REF"):
+                        continue
+                    nom = nom_vernaculaire(ligne.get("NOM_VERN") or "")
+                    if nom:
+                        _NOMS_FR[str(ligne.get("CD_REF") or "").strip()] = nom
+    except Exception:  # noqa: BLE001
+        _NOMS_FR = {}
+    return _NOMS_FR
+
+
 def _enrichir_znieff(gdf, chemin: Path):
     """Description générale + espèces déterminantes groupées par taxon.
 
@@ -612,20 +699,27 @@ def _enrichir_znieff(gdf, chemin: Path):
     fiches = archives.lire_csv(chemin, "REF_ZNIEFF",
                                colonnes=["NM_SFFZN", "LB_ZN", "TX_GENE", "TX_INTERET"],
                                cle="NM_SFFZN")
-    especes: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    francais = _noms_francais()
+    # {numero: {groupe: {"D": set, "E": set}}} — D pour determinante, E pour
+    # une espece simplement citee. `fg_esp` porte la distinction, que la
+    # version precedente ignorait : tout etait annonce « deterministe ».
+    especes: dict[str, dict[str, dict[str, set]]] = defaultdict(
+        lambda: defaultdict(lambda: {"D": set(), "E": set()}))
     for ligne in archives.lire_csv(chemin, "REF_ESPECE.csv",
                                    colonnes=["nm_sffzn", "groupe_taxo", "nom_cite",
-                                             "fg_supp"]):
+                                             "cd_ref", "fg_esp", "fg_supp"]):
         if (ligne.get("fg_supp") or "").strip().lower() == "true":
             continue
         numero = (ligne.get("nm_sffzn") or "").strip()
         groupe = (ligne.get("groupe_taxo") or "").strip() or "Autres"
         # Le nom cité porte son auteur et sa date : dans un tableau de
         # synthèse, la citation encombre sans rien apporter.
-        nom = nom_scientifique_court(
+        latin = nom_scientifique_court(
             nettoyer_texte(ligne.get("nom_cite") or "", 120))
+        nom = francais.get((ligne.get("cd_ref") or "").strip()) or latin
+        drapeau = "E" if (ligne.get("fg_esp") or "").strip().upper() == "E" else "D"
         if numero and nom:
-            especes[numero][groupe].add(nom)
+            especes[numero][groupe][drapeau].add(nom)
 
     def _sans_repetition(texte: str, nom: str) -> str:
         """Retire la redite du nom en tête de description.
@@ -660,28 +754,63 @@ def _enrichir_znieff(gdf, chemin: Path):
             return ""
         return reste
 
+    def _liste_especes(numero: str) -> str:
+        """Les espèces du zonage, groupées par groupe taxonomique.
+
+        Les déterminantes sont listées **en entier**. La version précédente
+        s'arrêtait à trois groupes de quatre noms : elle n'en nommait que douze
+        sur les quatre-vingt-dix-huit de la ZNIEFF 230031154, le reste
+        disparaissant derrière « et 72 autres ». La responsable environnement
+        l'a relevé sur quatre zonages, et avait raison sur les quatre.
+
+        Les groupes qui ne portent aucune espèce déterminante sont représentés
+        par quelques exemples : ils disent ce qu'on trouve sur le site sans
+        refaire le pavé qu'elle reprochait par ailleurs.
+        """
+        groupes = especes.get(numero)
+        if not groupes:
+            return ""
+        determinantes, exemples = [], []
+        for groupe, par_drapeau in groupes.items():
+            retenues = sorted(par_drapeau["D"], key=cle_alphabetique)
+            if retenues:
+                determinantes.append(
+                    (len(retenues),
+                     f"· {groupe} ({len(retenues)}) : " + ", ".join(retenues)))
+                continue
+            autres = sorted(par_drapeau["E"], key=cle_alphabetique)
+            if not autres:
+                continue
+            montres = autres[:MAX_EXEMPLES]
+            reste = len(autres) - len(montres)
+            suite = f", et {reste} autre{"s" if reste > 1 else ""}" if reste else ""
+            exemples.append(
+                (len(autres),
+                 f"· {groupe} ({len(autres)}) : " + ", ".join(montres) + suite))
+
+        bouts = []
+        if determinantes:
+            bouts.append("Espèces déterminantes\n" + "\n".join(
+                t for _, t in sorted(determinantes, key=lambda x: -x[0])))
+        if exemples:
+            bouts.append("Autres groupes représentés, à titre d'exemple\n"
+                         + "\n".join(t for _, t in
+                                     sorted(exemples, key=lambda x: -x[0])))
+        return "\n".join(bouts)
+
     def _texte(numero: str) -> str:
         fiche = fiches.get(numero) or {}
-        brut = nettoyer_texte(fiche.get("TX_GENE") or fiche.get("TX_INTERET") or "")
+        # Préambule court : la responsable environnement reproche « trop de
+        # blabla, trop pavé ». L'information utile est désormais dans la liste
+        # d'espèces en dessous ; la description générale dit de quel milieu il
+        # s'agit, en deux ou trois phrases, et s'arrête là.
+        brut = nettoyer_texte(
+            fiche.get("TX_GENE") or fiche.get("TX_INTERET") or "", limite=500)
         bouts = [_sans_repetition(brut, str(fiche.get("LB_ZN") or "").strip())]
-        groupes = especes.get(numero)
-        if groupes:
-            # L'échantillon se resserre quand une description existe déjà : la
-            # cellule d'un tableau doit rester lisible, et une ZNIEFF de type II
-            # porte parfois deux cents espèces déterminantes. Quand la fiche n'a
-            # pas de description, cette énumération est la seule information
-            # disponible et vaut qu'on lui laisse de la place.
-            avec_description = bool(bouts and bouts[0])
-            max_groupes, max_noms = (3, 4) if avec_description else (5, 6)
-            details = []
-            for groupe, noms in sorted(groupes.items(), key=lambda x: -len(x[1])):
-                echantillon = sorted(noms)[:max_noms]
-                reste = len(noms) - max_noms
-                suite = f" et {reste} autres" if reste > 0 else ""
-                details.append(f"{groupe} : {', '.join(echantillon)}{suite}")
-            bouts.append("Espèces déterminantes — "
-                         + " · ".join(details[:max_groupes]) + ".")
-        return " ".join(b for b in bouts if b)
+        liste = _liste_especes(numero)
+        if liste:
+            bouts.append(liste)
+        return "\n".join(b for b in bouts if b)
 
     gdf["_interet"] = gdf["_id"].map(_texte)
     manquants = gdf["_nom"].eq("") | gdf["_nom"].isna()

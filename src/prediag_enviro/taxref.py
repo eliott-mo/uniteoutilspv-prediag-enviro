@@ -66,6 +66,46 @@ def normaliser(s) -> str:
     return re.sub(r"[^a-z0-9 ]", " ", re.sub(r"\s+", " ", s)).strip()
 
 
+#: L'article que TaxRef accole en fin de nom vernaculaire — « Alyte
+#: accoucheur (L') ». C'est une convention de classement, pas une facon
+#: d'ecrire.
+_ARTICLE_FINAL = re.compile(r"\s*\((?:[LlDd]'|[Ll]es?|[Ll]a|[Dd]es?|[Dd]u)\)\s*$")
+
+
+def nom_vernaculaire(brut: str) -> str:
+    """Le nom français tel qu'il s'écrit dans un tableau.
+
+    TaxRef renvoie l'article en fin de nom — « Alyte accoucheur (L') » — et
+    peut en proposer plusieurs, séparés par des virgules. On garde le premier,
+    sans son article.
+    """
+    premier = str(brut or "").split(",")[0].strip()
+    return _ARTICLE_FINAL.sub("", premier)
+
+
+#: Ligatures qu'aucune décomposition Unicode ne défait : « Œ » n'a tout
+#: simplement pas de décomposition, ni en NFD ni en NFKD. Les sources écrivent
+#: tantôt « Œnanthe », tantôt « OEdipode » — sans ce repli, les deux formes se
+#: rangeraient à deux endroits différents, et « Œ » disparaîtrait purement et
+#: simplement de la clé de tri.
+_LIGATURES = {"Œ": "OE", "œ": "oe", "Æ": "AE", "æ": "ae"}
+
+
+def cle_alphabetique(texte: str) -> str:
+    """Clé de tri qui range « Écureuil » entre « Blaireau » et « Fouine ».
+
+    Python trie par point de code : « É » vaut U+00C9 et passe donc après
+    « Z ». Les espèces à initiale accentuée se retrouvaient en fin de tableau,
+    ce qu'a relevé la responsable environnement. On replie les accents pour la
+    comparaison, sans toucher au nom affiché.
+    """
+    brut = str(texte or "")
+    for ligature, rendu in _LIGATURES.items():
+        brut = brut.replace(ligature, rendu)
+    plat = unicodedata.normalize("NFD", brut)
+    return plat.encode("ascii", "ignore").decode().casefold()
+
+
 @dataclass
 class Taxon:
     cd_nom: str
