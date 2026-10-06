@@ -369,7 +369,7 @@ Le départage n'est pas affaire de goût : OneDrive synchronise ce qu'il voit.
 
 ```
 app.py                    l'interface, deux onglets
-Lancer le prediag.bat     le lanceur Windows
+_LANCER Prediag.bat       le lanceur Windows
 run_veille.py             la veille en ligne de commande
 config/sources.yml        référentiels épinglés (URL, version)
 classeurs/                les six classeurs B-Statuts, maître unique

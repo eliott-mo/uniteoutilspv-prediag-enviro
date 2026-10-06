@@ -47,7 +47,7 @@ CODE = [
     "app.py",
     "run_veille.py",
     "publier.py",
-    "Lancer le prediag.bat",
+    "_LANCER Prediag.bat",
     "requirements.txt",
     "packages.txt",
     "logo_unite.png",
@@ -137,7 +137,7 @@ LISEZ_MOI = """PRÉDIAG ENVIRONNEMENTAL
 
 POUR LANCER L'OUTIL
 -------------------
-Double-cliquez sur « Lancer le prediag.bat ».
+Double-cliquez sur « _LANCER Prediag.bat ».
 
 Au premier lancement, l'outil prépare son environnement sur votre poste :
 comptez deux à cinq minutes. Les fois suivantes, il démarre en quelques

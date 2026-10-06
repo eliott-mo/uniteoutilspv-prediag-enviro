@@ -50,21 +50,47 @@ if not defined PY (
     exit /b 1
 )
 
-rem --- 2. Preparer l'environnement, une fois -------------------------------
-if not exist "%VENV%\Scripts\python.exe" (
+rem --- 2. Preparer l'environnement, quand il le faut ------------------------
+rem  Le temoin est une COPIE de requirements.txt, deposee par ce script une
+rem  fois l'installation reussie. Trois raisons, chacune constatee :
+rem
+rem  - tester l'existence de python.exe ne dit rien des paquets. Une
+rem    installation interrompue - fenetre fermee, veille, antivirus - laisse
+rem    un environnement d'apparence complete mais incomplet, et l'outil
+rem    mourait ensuite sur une trace Python sans jamais se reparer ;
+rem  - tester un executable comme streamlit.exe ne vaut pas mieux : un
+rem    antivirus supprime volontiers les petits .exe ecrits par pip, et le
+rem    script reinstallerait a chaque lancement ;
+rem  - comparer le contenu de requirements.txt rattrape en plus le cas d'une
+rem    dependance ajoutee depuis la derniere publication.
+set "TEMOIN=%VENV%\requirements-installes.txt"
+set "PREPARER=1"
+if exist "%TEMOIN%" (
+    fc /b "%TEMOIN%" "%APPLI%requirements.txt" > nul 2>&1
+    if not errorlevel 1 set "PREPARER="
+)
+
+if defined PREPARER (
     echo   Premier lancement : preparation de l'environnement.
     echo   Comptez 2 a 5 minutes. Les lancements suivants seront immediats.
     echo.
     if not exist "%DONNEES%" mkdir "%DONNEES%"
-    %PY% -m venv "%VENV%"
-    if errorlevel 1 (
-        echo.
-        echo   La creation de l'environnement a echoue.
-        echo   Verifiez que Python est complet ^(le module venv est parfois
-        echo   absent des installations minimales^).
-        echo.
-        pause
-        exit /b 1
+    rem  On ne recree pas l'environnement s'il est deja la : seuls les paquets
+    rem  manquent, et pip reprend sans retelecharger ce qui est en cache.
+    rem  Le test d'erreur est imbrique : laisse a plat, "if errorlevel" lirait
+    rem  le code de retour de la commande precedente quand la creation est
+    rem  sautee, et l'outil abandonnerait sur un environnement pourtant sain.
+    if not exist "%VENV%\Scripts\python.exe" (
+        %PY% -m venv "%VENV%"
+        if errorlevel 1 (
+            echo.
+            echo   La creation de l'environnement a echoue.
+            echo   Verifiez que Python est complet ^(le module venv est parfois
+            echo   absent des installations minimales^).
+            echo.
+            pause
+            exit /b 1
+        )
     )
     echo   Installation des composants...
     "%VENV%\Scripts\python.exe" -m pip install --upgrade pip --quiet
@@ -81,6 +107,9 @@ if not exist "%VENV%\Scripts\python.exe" (
         pause
         exit /b 1
     )
+    rem  Le temoin n'est depose qu'ici : tant que l'installation n'est pas
+    rem  allee au bout, le prochain lancement la reprendra.
+    copy /y "%APPLI%requirements.txt" "%TEMOIN%" > nul
     echo   Environnement pret.
     echo.
 )
