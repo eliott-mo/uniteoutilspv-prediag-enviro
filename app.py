@@ -3,7 +3,7 @@
 Deux onglets, dans l'ordre où on s'en sert :
 
     A · Mise à jour des tables  — ce qui a bougé dans les référentiels depuis
-                                  la dernière révision des classeurs B-Statuts
+                                  la dernière révision des classeurs UNITe
     B · Prédiag                 — emprise projet, communes, recoupement des
                                   sources d'espèces, tableaux Word
 
@@ -102,7 +102,7 @@ def _contexte() -> service.Contexte:
     return ctx
 
 
-@st.cache_resource(show_spinner="Lecture des classeurs B-Statuts…")
+@st.cache_resource(show_spinner="Lecture des classeurs UNITe…")
 def _classeurs(_jeton: float):
     """`_jeton` force la relecture quand un classeur est redéposé."""
     return service.charger_classeurs(RACINE)
@@ -157,6 +157,28 @@ def _deposer(fichier) -> Path:
     cible = _dossier_travail() / fichier.name
     cible.write_bytes(fichier.getbuffer())
     return cible
+
+
+@st.dialog("Carte", width="large")
+def _agrandir(carte) -> None:
+    """Montre une carte en grand, pour la contrôler avant de produire.
+
+    Les planches sortent à 3 500 px de large. En vignette au quart de la page,
+    les toponymes du fond de plan sont illisibles — or c'est précisément ce
+    qu'on veut vérifier : qu'une commune mal cadrée ou un zonage mal placé se
+    voit avant d'arriver dans le document.
+
+    Le téléchargement reste proposé : même en pleine largeur, la boîte de
+    dialogue n'affiche pas 3 500 px, et la lecture fine se fait dans une
+    visionneuse.
+    """
+    st.markdown(f"**{carte.titre}** — {carte.nb_zonages} zonage(s)")
+    st.image(str(carte.chemin), width="stretch")
+    st.download_button(
+        "⬇️ Télécharger en pleine définition", Path(carte.chemin).read_bytes(),
+        file_name=Path(carte.chemin).name, mime="image/png", width="stretch",
+        key=f"tel_{carte.famille}",
+    )
 
 
 service.emplacements(RACINE)
@@ -235,8 +257,9 @@ with onglet_a:
     with col_classeurs:
         if not cs:
             st.warning(
-                f"Aucun classeur dans `{chemins.classeurs()}`. Y déposer les fichiers "
-                f"B-Statuts (noms reconnus : {', '.join(service.MOTIFS.values())})."
+                f"Aucun classeur dans `{chemins.classeurs()}`. Y déposer les "
+                f"classeurs UNITe (noms de fichiers reconnus : "
+                f"{', '.join(service.MOTIFS.values())})."
             )
         else:
             # Deux manques très différents se cachent derrière un même écart.
@@ -282,7 +305,7 @@ with onglet_a:
                 hide_index=True, width="stretch",
                 column_config={
                     "Classeur": st.column_config.TextColumn(
-                        help="Le fichier B-Statuts lu dans `classeurs/`, un par "
+                        help="Le classeur UNITe lu dans `classeurs/`, un par "
                              "groupe taxonomique."),
                     "Taxons": st.column_config.NumberColumn(
                         format="%d",
@@ -827,10 +850,19 @@ with onglet_b:
                         st.error(f"Rendu impossible : {erreur}")
 
             produites = st.session_state.get("cartes") or []
-            for carte in produites:
-                st.image(str(carte.chemin), caption=f"{carte.titre} — "
-                         f"{carte.nb_zonages} zonage(s)", width="stretch")
             if produites:
+                # Les planches sur une seule ligne. Empilées en pleine largeur,
+                # elles repoussaient les sections suivantes plusieurs écrans
+                # plus bas : la vignette suffit à juger du cadrage et du nombre
+                # de zonages, « Agrandir » sert à lire le détail.
+                for colonne, carte in zip(st.columns(len(produites)), produites):
+                    with colonne:
+                        st.image(str(carte.chemin), width="stretch")
+                        st.caption(f"{carte.titre} — "
+                                   f"{carte.nb_zonages} zonage(s)")
+                        if st.button("Agrandir", width="stretch",
+                                     key=f"zoom_{carte.famille}"):
+                            _agrandir(carte)
                 st.caption(
                     "Fond Plan IGN (Géoplateforme). Le serveur de tuiles public "
                     "d'OpenStreetMap refuse l'usage automatisé : sa politique "
@@ -839,10 +871,15 @@ with onglet_b:
         st.divider()
         st.subheader("5 · Sources d'espèces")
         st.caption(
-            "Déposez ce que vous avez relevé sur vos sources ; l'outil les "
-            "recoupe, il ne va rien chercher à votre place. Exports Excel ou "
-            "CSV, PDF, captures d'écran — un export avec les noms latins vaut "
-            "dix captures : 98,6 % d'appariement contre 81 %."
+            "Ce qu'on attend ici est la **liste des espèces** présentes, et "
+            "elle seule : leurs statuts sont lus automatiquement dans "
+            "BDC-Statuts, et les classeurs UNITe ne servent qu'à la veille "
+            "de l'onglet A — rien à charger de ce côté. Déposez donc ce que "
+            "vous avez relevé sur vos sources ; l'outil les recoupe, il ne va "
+            "rien chercher à votre place. Sans dépôt, les volets Avifaune, "
+            "Chiroptères et Autre faune du document sortent sans tableau. "
+            "Exports Excel ou CSV, PDF, captures d'écran — un export avec les "
+            "noms latins vaut dix captures : 98,6 % d'appariement contre 81 %."
         )
 
         depots_sources = st.file_uploader(
@@ -978,19 +1015,31 @@ with onglet_b:
         resultat_zonages = st.session_state.get("zonages")
         cartes_produites = st.session_state.get("cartes") or []
 
+        # Ce qui manque est nommé côté **document**, pas côté outil : savoir
+        # que « la section 5 est vide » n'aide pas, savoir que les volets
+        # Avifaune, Chiroptères et Autre faune sortiront sans tableau, si. Et
+        # c'est un avertissement, pas une légende : en petit texte gris, la
+        # remarque passait inaperçue et le manque se découvrait dans Word.
         manques = []
         if resultat_zonages is None:
-            manques.append("le patrimoine naturel (section 4)")
+            manques.append("le patrimoine naturel : ni tableau de zonages ni "
+                           "carte (section 4)")
         elif not cartes_produites:
             manques.append("les cartes (section 4)")
         if resultat_especes is None or not resultat_especes.especes:
-            manques.append("les espèces (sections 5 et 6)")
+            manques.append("les espèces : les volets Avifaune, Chiroptères et "
+                           "Autre faune de l'état initial, ainsi que les "
+                           "annexes, sortiront sans tableau (section 5)")
         if manques:
-            st.caption(
-                "À ce stade, le document sortira avec une consigne à la place "
-                "de " + ", ".join(manques) + ". C'est volontaire : un "
-                "prédiagnostic se construit par allers-retours, et refuser de "
-                "produire obligerait à tout faire dans l'ordre."
+            # « Il manque encore » plutôt que « à la place de » : les éléments
+            # commencent par leur article, et « à la place de les espèces »
+            # ne s'élide pas.
+            st.warning(
+                "Il manque encore " + " ; ".join(manques) + ". Le document se "
+                "produira quand même, avec une consigne en couleur à chaque "
+                "emplacement : un prédiagnostic se construit par allers-"
+                "retours, et refuser de produire obligerait à tout faire dans "
+                "l'ordre."
             )
 
         col_mod, col_gen = st.columns([2, 1], gap="large")
