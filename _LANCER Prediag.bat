@@ -51,68 +51,94 @@ if not defined PY (
 )
 
 rem --- 2. Preparer l'environnement, quand il le faut ------------------------
-rem  Le temoin est une COPIE de requirements.txt, deposee par ce script une
-rem  fois l'installation reussie. Trois raisons, chacune constatee :
+rem  Le temoin est une COPIE de requirements.txt, deposee une fois
+rem  l'installation reussie : tester python.exe ne dit rien des paquets, et
+rem  tester un .exe de pip ne vaut pas mieux (un antivirus les supprime).
+rem  Comparer le contenu rattrape en plus une dependance ajoutee depuis la
+rem  derniere publication.
 rem
-rem  - tester l'existence de python.exe ne dit rien des paquets. Une
-rem    installation interrompue - fenetre fermee, veille, antivirus - laisse
-rem    un environnement d'apparence complete mais incomplet, et l'outil
-rem    mourait ensuite sur une trace Python sans jamais se reparer ;
-rem  - tester un executable comme streamlit.exe ne vaut pas mieux : un
-rem    antivirus supprime volontiers les petits .exe ecrits par pip, et le
-rem    script reinstallerait a chaque lancement ;
-rem  - comparer le contenu de requirements.txt rattrape en plus le cas d'une
-rem    dependance ajoutee depuis la derniere publication.
+rem  Tout est ecrit en sauts (goto) et non en blocs parentheses : dans un
+rem  bloc, cmd developpe les variables a la lecture et non a l'execution,
+rem  ce qui rend les tests enchaines difficiles a relire et a verifier.
 set "TEMOIN=%VENV%\requirements-installes.txt"
-set "PREPARER=1"
-if exist "%TEMOIN%" (
-    fc /b "%TEMOIN%" "%APPLI%requirements.txt" > nul 2>&1
-    if not errorlevel 1 set "PREPARER="
-)
 
-if defined PREPARER (
-    echo   Premier lancement : preparation de l'environnement.
-    echo   Comptez 2 a 5 minutes. Les lancements suivants seront immediats.
-    echo.
-    if not exist "%DONNEES%" mkdir "%DONNEES%"
-    rem  On ne recree pas l'environnement s'il est deja la : seuls les paquets
-    rem  manquent, et pip reprend sans retelecharger ce qui est en cache.
-    rem  Le test d'erreur est imbrique : laisse a plat, "if errorlevel" lirait
-    rem  le code de retour de la commande precedente quand la creation est
-    rem  sautee, et l'outil abandonnerait sur un environnement pourtant sain.
-    if not exist "%VENV%\Scripts\python.exe" (
-        %PY% -m venv "%VENV%"
-        if errorlevel 1 (
-            echo.
-            echo   La creation de l'environnement a echoue.
-            echo   Verifiez que Python est complet ^(le module venv est parfois
-            echo   absent des installations minimales^).
-            echo.
-            pause
-            exit /b 1
-        )
-    )
-    echo   Installation des composants...
-    "%VENV%\Scripts\python.exe" -m pip install --upgrade pip --quiet
-    "%VENV%\Scripts\python.exe" -m pip install -r "%APPLI%requirements.txt" --quiet
-    if errorlevel 1 (
-        echo.
-        echo   L'installation des composants a echoue.
-        echo.
-        echo   Cause la plus frequente : le reseau de l'entreprise bloque
-        echo   l'acces a pypi.org. Montrez ce message au service informatique,
-        echo   il saura quoi autoriser.
-        echo.
-        rmdir /s /q "%VENV%" 2> nul
-        pause
-        exit /b 1
-    )
-    rem  Le temoin n'est depose qu'ici : tant que l'installation n'est pas
-    rem  allee au bout, le prochain lancement la reprendra.
-    copy /y "%APPLI%requirements.txt" "%TEMOIN%" > nul
-    echo   Environnement pret.
-    echo.
-)
+if not exist "%TEMOIN%" goto preparer
+fc /b "%TEMOIN%" "%APPLI%requirements.txt" > nul 2>&1
+if errorlevel 1 goto preparer
+rem  Le temoin peut etre bon et l'environnement abime depuis. Un import
+rem  reel coute un instant et evite de demarrer pour mourir trois lignes
+rem  plus loin sur une trace Python.
+"%VENV%\Scripts\python.exe" -c "import streamlit" > nul 2>&1
+if errorlevel 1 goto preparer
+goto lancer
+
+:preparer
+echo   Preparation de l'environnement.
+echo   Comptez 2 a 5 minutes la premiere fois. Ensuite, demarrage immediat.
+echo.
+if not exist "%DONNEES%" mkdir "%DONNEES%"
+if not exist "%VENV%\Scripts\python.exe" goto creer_venv
+
+rem  pip absent de l'environnement : il est reellement abime, et insister
+rem  ne sert a rien. C'est le SEUL cas ou ce script supprime quoi que ce
+rem  soit - voir :echec_install pour pourquoi on ne le fait plus ailleurs.
+"%VENV%\Scripts\python.exe" -m pip --version > nul 2>&1
+if not errorlevel 1 goto installer
+echo   Environnement abime : reconstruction.
+rmdir /s /q "%VENV%" 2> nul
+
+:creer_venv
+%PY% -m venv "%VENV%"
+if errorlevel 1 goto echec_venv
+
+:installer
+echo   Installation des composants...
+"%VENV%\Scripts\python.exe" -m pip install --upgrade pip --quiet
+"%VENV%\Scripts\python.exe" -m pip install -r "%APPLI%requirements.txt" --quiet
+if not errorlevel 1 goto installe
+
+rem  Un echec est souvent passager : antivirus qui verrouille un fichier le
+rem  temps de l'analyser, coupure reseau breve. On retente une fois.
+echo   Echec ; nouvelle tentative...
+"%VENV%\Scripts\python.exe" -m pip install -r "%APPLI%requirements.txt" --quiet
+if errorlevel 1 goto echec_install
+
+:installe
+rem  Le temoin n'est depose qu'ici : tant que l'installation n'est pas allee
+rem  au bout, le prochain lancement la reprendra.
+copy /y "%APPLI%requirements.txt" "%TEMOIN%" > nul
+echo   Environnement pret.
+echo.
+goto lancer
+
+:echec_venv
+echo.
+echo   La creation de l'environnement a echoue.
+echo   Verifiez que Python est complet ^(le module venv est parfois
+echo   absent des installations minimales^).
+echo.
+pause
+exit /b 1
+
+:echec_install
+echo.
+echo   L'installation des composants a echoue, deux fois de suite.
+echo.
+echo   Causes possibles :
+echo     - le reseau de l'entreprise bloque l'acces a pypi.org ;
+echo     - un antivirus verrouille les fichiers pendant l'installation.
+echo.
+echo   L'environnement n'a PAS ete supprime. Une version anterieure de ce
+echo   script l'effacait des le premier echec : 366 Mo refaits pour une
+echo   lecture ratee, alors qu'un second essai suffit le plus souvent.
+echo.
+echo   Pour repartir de zero, si vraiment necessaire :
+echo     rmdir /s /q "%VENV%"
+echo.
+pause
+exit /b 1
+
+:lancer
 
 rem --- 3. Lancer --------------------------------------------------------------
 echo   Ouverture dans votre navigateur...
@@ -123,10 +149,16 @@ echo     Pour quitter : fermez-la.
 echo   ----------------------------------------------------------------
 echo.
 
+rem  toolbarMode minimal retire le bouton "Deploy" de Streamlit, qui propose
+rem  une mise en ligne sur Streamlit Community Cloud. Cet hebergement ne peut
+rem  pas convenir : les referentiels INPN et les extraits departementaux
+rem  pesent environ 1,9 Go, absents du depot et impossibles a y mettre. Le
+rem  bouton ne menait donc qu'a une impasse.
 start "" "http://localhost:%PORT%"
 "%VENV%\Scripts\python.exe" -m streamlit run "%APPLI%app.py" ^
     --server.port %PORT% ^
     --server.headless true ^
-    --browser.gatherUsageStats false
+    --browser.gatherUsageStats false ^
+    --client.toolbarMode minimal
 
 endlocal
