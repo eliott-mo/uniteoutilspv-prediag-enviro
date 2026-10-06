@@ -843,6 +843,8 @@ def _enrichir_znieff(gdf, chemin: Path):
 _GROUPES_FSD = {
     "B": "Oiseaux", "M": "Mammifères", "A": "Amphibiens", "R": "Reptiles",
     "F": "Poissons", "I": "Invertébrés", "P": "Plantes", "X": "Autres",
+    # La section 3.3 du formulaire emploie deux codes de plus.
+    "FU": "Champignons", "L": "Lichens",
 }
 
 #: Au-dela, on donne le compte et un echantillon plutot que la liste entiere.
@@ -969,6 +971,26 @@ def _enrichir_natura(gdf, chemin: Path):
             inscrite = cd_ref in annexe2
         especes[site][groupe]["annexe" if inscrite else "autre"].add(nom)
 
+    # Section 3.3 du formulaire — « autres espèces importantes de faune et de
+    # flore ». Elle vit dans sa propre table, et elle compte : la ZSC
+    # FR2302007 n'a aucune ligne en 3.2, mais deux plantes en 3.3, que le
+    # prédiagnostic de référence cite nommément. S'en tenir à `species.csv`
+    # rendait ce site muet.
+    for ligne in archives.lire_csv(chemin, "species_other.csv",
+                                   colonnes=["sitecode", "cd_ref",
+                                             "nom_taxref", "taxgroup"]):
+        site = (ligne.get("sitecode") or "").strip()
+        if not site:
+            continue
+        cd_ref = (ligne.get("cd_ref") or "").strip()
+        groupe = _GROUPES_FSD.get((ligne.get("taxgroup") or "").strip().upper(),
+                                  "Autres")
+        nom = (francais.get(cd_ref)
+               or nom_scientifique_court(
+                   nettoyer_texte(ligne.get("nom_taxref") or "", 90)))
+        if nom:
+            especes[site][groupe]["autre"].add(nom)
+
     habitats: dict[str, set] = defaultdict(set)
     for ligne in archives.lire_csv(chemin, "habit1.csv",
                                    colonnes=["sitecode", "cd_ue"]):
@@ -1041,8 +1063,8 @@ def _enrichir_natura(gdf, chemin: Path):
                 # qu'emploie le prédiagnostic de référence.
                 jonction = ", dont :" if combien > MAX_ESPECES_N2000 else " :"
                 lignes.append(f"· {groupe} ({combien}){jonction} {liste}")
-            bouts.append("Autres espèces recensées, hors annexe\n"
-                         + "\n".join(lignes))
+            bouts.append(f"Autres espèces recensées, non inscrites à "
+                         f"l'Annexe {annexe}\n" + "\n".join(lignes))
 
         milieux = habitats.get(site)
         if milieux:
