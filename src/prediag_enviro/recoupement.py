@@ -189,11 +189,24 @@ def lire_depot(depot: Depot) -> tuple[list[list[str]], str]:
     """Renvoie les lignes brutes du fichier et un éventuel avertissement."""
     suffixe = depot.chemin.suffix.lower()
     if suffixe in FORMATS_TABLEUR:
-        return _lignes_tableur(depot.chemin), ""
+        # openpyxl ne lit que l'OOXML. Un .xls hérité — ce que produisent
+        # encore certains exports de portails — le fait lever, et l'exception
+        # remontait jusqu'à l'écran alors que le format était proposé au
+        # dépôt. Mieux vaut le dire, avec la manœuvre pour s'en sortir.
+        try:
+            return _lignes_tableur(depot.chemin), ""
+        except Exception as erreur:  # noqa: BLE001
+            if suffixe == ".xls":
+                return [], ("classeur .xls hérité, illisible en l'état — "
+                            "rouvrez-le dans Excel et enregistrez-le en .xlsx")
+            return [], f"classeur illisible : {erreur}"
     if suffixe in FORMATS_TEXTE:
         return _lignes_texte(depot.chemin), ""
     if suffixe in FORMATS_PDF:
-        return _lignes_pdf(depot.chemin), ""
+        try:
+            return _lignes_pdf(depot.chemin), ""
+        except Exception as erreur:  # noqa: BLE001
+            return [], f"PDF illisible : {erreur}"
     if suffixe in FORMATS_IMAGE:
         return _lignes_image(depot.chemin)
     return [], f"format non pris en charge : {suffixe}"
@@ -315,7 +328,13 @@ def consolider(depots: list[Depot], idx: Index,
     par_espece: dict[str, Espece] = {}
 
     for depot in depots:
-        mentions, avertissement = extraire(depot, idx, memoire)
+        # Un fichier illisible ne doit pas emporter les autres : un recoupement
+        # porte couramment sur cinq ou six dépôts, et perdre les cinq bons
+        # parce que le sixième est corrompu obligerait à tout recommencer.
+        try:
+            mentions, avertissement = extraire(depot, idx, memoire)
+        except Exception as erreur:  # noqa: BLE001
+            mentions, avertissement = [], f"non lu — {erreur}"
         res.journal.append(
             f"{depot.chemin.name} — {len(mentions)} mention(s)"
             + (f" · {avertissement}" if avertissement else "")
