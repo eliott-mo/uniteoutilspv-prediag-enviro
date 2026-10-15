@@ -597,10 +597,13 @@ PLURIELS = {
     "Terrain du Conservatoire du Littoral":
         "Terrains du Conservatoire du Littoral",
     "Site Ramsar": "Sites Ramsar",
-    # Déposé par l'équipe, pas issu du registre national : les ENS n'ont pas
-    # de couche nationale fiable (voir sources_locales.py).
+    # Deux origines pour un même type : le flux WFS de l'INPN, dont la couche
+    # est annoncée « en construction », et ce que l'équipe dépose
+    # département par département (voir sources_locales.py).
     "Espace Naturel Sensible": "Espaces Naturels Sensibles",
     "Site d'intérêt géologique (INPG)": "Sites d'intérêt géologique (INPG)",
+    "Zone Importante pour la Conservation des Oiseaux":
+        "Zones Importantes pour la Conservation des Oiseaux",
 }
 
 
@@ -1253,6 +1256,68 @@ def _enrichir_ep(gdf, chemin: Path):
     return gdf
 
 
+def _enrichir_ens(gdf, chemin: Path):
+    """Ce qu'on peut dire d'un espace naturel sensible.
+
+    La couche porte peu : une date de création, une surface, et le
+    département qui le gère. Pas de description — mais « Créé le 06/07/2007
+    · 33,6 ha · CD 03 » est déjà ce qu'un tableau d'inventaire attend, et
+    c'est exact.
+
+    La date arrive en JJ-MM-AAAA, et non en ISO comme dans l'archive des
+    espaces protégés : `_date_acte` ne sait pas la lire.
+    """
+    colonne_date = _premiere_colonne(gdf, ("date_crea",))
+    colonne_surface = _premiere_colonne(gdf, ("surf_sig",))
+    colonne_operateur = _premiere_colonne(gdf, ("operateur",))
+
+    def _jour(brut) -> str:
+        texte = str(brut or "").strip()
+        if len(texte) != 10 or texte[2] != "-" or texte[5] != "-":
+            return ""
+        jour, mois, annee = texte[:2], texte[3:5], texte[6:]
+        if not (jour.isdigit() and mois.isdigit() and annee.isdigit()):
+            return ""
+        # Comme dans l'archive des espaces protégés, un 1ᵉʳ janvier est le
+        # plus souvent une année seule complétée : on ne publie que l'année
+        # plutôt que d'affirmer une précision que la source n'a pas.
+        return annee if (jour, mois) == ("01", "01") else f"{jour}/{mois}/{annee}"
+
+    def _texte(ligne) -> str:
+        bouts = []
+        if colonne_date:
+            date = _jour(ligne.get(colonne_date))
+            if date:
+                bouts.append(f"Créé le {date}" if "/" in date
+                             else f"Créé en {date}")
+        if colonne_surface:
+            surface = _surface_lisible(ligne.get(colonne_surface))
+            if surface:
+                bouts.append(surface)
+        if colonne_operateur:
+            op = str(ligne.get(colonne_operateur) or "").strip()
+            if op and op.lower() not in ("none", "nan"):
+                bouts.append(f"géré par {op}")
+        return " · ".join(bouts)
+
+    gdf = gdf.copy()
+    gdf["_interet"] = gdf.apply(_texte, axis=1)
+    gdf["_nom"] = gdf["_nom"].map(casse_lisible)
+    return gdf
+
+
+def _enrichir_zico(gdf, chemin: Path):
+    """La couche ne porte qu'un identifiant et un nom, tout en capitales.
+
+    Rien à décrire : l'intitulé du type dit déjà ce qu'est une ZICO. Reste à
+    remettre le nom en casse de lecture, comme pour les autres couches —
+    « BOUCLE DE POSE ET DE MUIDS » n'a pas sa place dans un livrable.
+    """
+    gdf = gdf.copy()
+    gdf["_nom"] = gdf["_nom"].map(casse_lisible)
+    return gdf
+
+
 def _source_ep(libelle: str, types: tuple[str, ...],
                famille: str = "autres") -> SourceZonage:
     return SourceZonage(
@@ -1317,5 +1382,30 @@ def registre() -> list[SourceZonage]:
         famille="autres", type_libelle="Site d'intérêt géologique (INPG)",
         colonnes_id=("identifi_1",), colonnes_nom=(),
         enrichir=_enrichir_inpg,
+    ))
+    # Les deux couches que les archives ne portent pas, servies par le flux
+    # WFS de l'INPN et figées avec leur date de récupération.
+    #
+    # Les ENS partagent leur intitulé avec ceux que l'équipe dépose
+    # elle-même : c'est le même type d'espace, et le tableau les regroupe.
+    # L'INPN annonce sa couche « en construction » et la responsable
+    # environnement la dit non exhaustive — les deux sources se complètent
+    # donc, et un même site peut figurer deux fois là où les deux le portent.
+    sources.append(SourceZonage(
+        cle="ens", archive="ens", motif_shp="Espaces_naturels_sensibles",
+        famille="autres", type_libelle="Espace Naturel Sensible",
+        colonnes_id=("ID_MNHN",), colonnes_nom=("NOM_SITE",),
+        enrichir=_enrichir_ens,
+    ))
+    # Les ZICO rejoignent les zonages d'inventaire, où l'état initial les
+    # annonçait déjà : sa section s'intitule « ZNIEFF de type I et II et ZICO
+    # (zonages d'inventaires) », reprise du livrable de référence. La place
+    # était prévue, la donnée manquait.
+    sources.append(SourceZonage(
+        cle="zico", archive="zico", motif_shp="ZICO",
+        famille="inventaire",
+        type_libelle="Zone Importante pour la Conservation des Oiseaux",
+        colonnes_id=("ID_SPN",), colonnes_nom=("NOM",),
+        enrichir=_enrichir_zico,
     ))
     return sources

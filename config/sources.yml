@@ -51,3 +51,22 @@ referentiels:
     version: "07/2025"
     url: "https://assets.patrinat.fr/files/donnees/inpg/INPG.zip"
     fichier: "INPG.zip"
+
+  # Deux couches que les archives de l'INPN ne portent pas, servies par son
+  # flux WFS. On les fige une fois, comme les archives, plutôt que d'interroger
+  # le flux à chaque prédiagnostic : l'outil doit tourner hors ligne, et la
+  # Licence Ouverte impose de citer une source AVEC sa date. Un flux n'a pas
+  # de version publiée — `version` reste vide et la date de récupération en
+  # tient lieu.
+  #
+  # Pour rafraîchir : supprimer l'archive locale et relancer. Ces couches
+  # bougent, l'INPN annonce lui-même celle des ENS « en construction ».
+  ens:
+    version: ""
+    url: "http://ws.carmencarto.fr/WFS/119/fxx_inpn?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ms:Espaces_naturels_sensibles&OUTPUTFORMAT=SHAPE"
+    fichier: "ENS.zip"
+
+  zico:
+    version: ""
+    url: "http://ws.carmencarto.fr/WFS/119/fxx_inpn?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ms:ZICO&OUTPUTFORMAT=SHAPE"
+    fichier: "ZICO.zip"

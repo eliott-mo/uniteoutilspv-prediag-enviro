@@ -135,7 +135,8 @@ def territoires_disponibles(cs: dict[str, classeurs.Classeur],
 
 #: Référentiels nécessaires aux seuls zonages — 460 Mo, téléchargés à la
 #: première utilisation de la section et pas avant.
-CLES_ZONAGES = ("znieff", "natura2000", "espaces_proteges", "patrimoine_geologique")
+CLES_ZONAGES = ("znieff", "natura2000", "espaces_proteges",
+                "patrimoine_geologique", "ens", "zico")
 
 
 def preparer_zonages(racine: Path, progression=None) -> tuple[dict[str, str], list[str]]:

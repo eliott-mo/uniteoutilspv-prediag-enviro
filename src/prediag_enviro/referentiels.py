@@ -32,6 +32,8 @@ NOMS_AFFICHES = {
     "natura2000": "Natura 2000",
     "espaces_proteges": "Espaces protégés",
     "patrimoine_geologique": "Inventaire du patrimoine géologique",
+    "ens": "Espaces naturels sensibles (flux WFS de l'INPN)",
+    "zico": "Zones importantes pour la conservation des oiseaux (flux WFS)",
 }
 
 
@@ -46,7 +48,12 @@ class Referentiel:
     def citation(self, attribution: str) -> str:
         """Mention de paternité exigée par la Licence Ouverte."""
         nom = NOMS_AFFICHES.get(self.cle, self.cle)
-        return f"{nom} v{self.version} — {attribution}, récupéré le {self.recupere_le}"
+        # Un flux ne publie pas de version : sa date de récupération en tient
+        # lieu, et c'est elle que la Licence Ouverte exige de citer. Écrire
+        # « v » suivi de rien ferait croire à une version perdue.
+        millesime = f" v{self.version}" if self.version else ""
+        return (f"{nom}{millesime} — {attribution}, "
+                f"récupéré le {self.recupere_le}")
 
 
 def _taille_distante(url: str) -> int | None:
@@ -107,6 +114,15 @@ def telecharger(url: str, dest: Path, attendu: int | None = None,
                     f"{attendu or '?'}) : {e}"
                 ) from e
             time.sleep(min(2 ** echecs_sans_progres, 60))
+        else:
+            # Sans taille annoncée, la complétude ne se vérifie pas : une
+            # requête menée à son terme sans erreur fait foi. C'est le cas
+            # d'un flux WFS, qui calcule sa réponse et n'en connaît pas la
+            # longueur d'avance. Faute de cette sortie, la boucle se rejouait
+            # indéfiniment — sa condition de retour porte sur une taille
+            # qu'on n'a pas.
+            if not attendu:
+                return dest
 
     if attendu and dest.stat().st_size < attendu:
         raise RuntimeError(
@@ -187,7 +203,10 @@ def assurer(cfg: dict, dossier: Path, forcer: bool = False,
         attendu = _taille_distante(spec["url"])
         deja_complet = dest.exists() and attendu and dest.stat().st_size >= attendu
         if not deja_complet:
-            print(f"  téléchargement {cle} v{spec['version']} …", flush=True)
+            # Un flux n'a pas de version : « téléchargement ens v … » se lit
+            # comme une version perdue.
+            millesime = f" v{spec['version']}" if spec.get("version") else ""
+            print(f"  téléchargement {cle}{millesime} …", flush=True)
         telecharger(spec["url"], dest, attendu=attendu)
         taille = dest.stat().st_size / 1048576
         if not deja_complet:
