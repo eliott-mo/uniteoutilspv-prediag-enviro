@@ -195,10 +195,46 @@ def croiser_zonages_extraits(racine: Path, emprise_union, departements: list[str
     Lève `extraits.DepartementAbsent` si le projet sort du périmètre construit,
     plutôt que de rendre une liste vide qui passerait pour un résultat.
     """
+    ecartes = types_deposes(departements)
     resultat = extraits.croiser(emprise_union, departements,
-                                dossier_extraits(racine), aires=aires)
+                                dossier_extraits(racine), aires=aires,
+                                ecartes=ecartes)
     fusionner_sources_locales(resultat, emprise_union, departements, aires)
+    # Écarter la couche nationale sans le dire serait une perte silencieuse :
+    # le lecteur du prédiagnostic doit savoir laquelle des deux il regarde.
+    for departement, types in sorted(ecartes.items()):
+        for type_libelle in sorted(types):
+            resultat.avertissements.append(
+                f"{type_libelle} — département {departement} : la couche "
+                f"nationale de l'INPN est écartée au profit de celle déposée "
+                f"par l'équipe, qui fait référence pour ce département."
+            )
     return resultat
+
+
+def types_deposes(departements: list[str]) -> dict[str, set[str]]:
+    """Types de zonages pour lesquels l'équipe a déposé sa propre couche.
+
+    Une couche déposée **prime sur la couche nationale, dans son département**.
+    C'est le sens même du dépôt : on ne va chercher la couche ENS d'un
+    Département que parce que celle de l'INPN est incomplète — elle s'annonce
+    d'ailleurs « en construction ». Garder les deux ferait figurer deux fois
+    les sites que les deux portent, sous le même intitulé, ce qui n'est pas
+    une distinction utile mais un doublon.
+
+    Le cas est différent de celui d'un terrain de Conservatoire également
+    classé ENS : là, deux désignations distinctes se recoupent, et la
+    responsable environnement demande de les garder toutes deux.
+    """
+    par_departement: dict[str, set[str]] = {}
+    for source in sources_locales.pour(departements):
+        # Une source documentée sans couche ne remplace rien : elle compte
+        # pour la bibliographie, pas pour le croisement.
+        if not source.fichier:
+            continue
+        par_departement.setdefault(str(source.departement),
+                                   set()).add(source.type_libelle)
+    return par_departement
 
 
 def fusionner_sources_locales(resultat, emprise_union, departements: list[str],

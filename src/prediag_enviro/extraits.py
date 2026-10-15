@@ -211,8 +211,16 @@ class DepartementAbsent(RuntimeError):
         )
 
 
-def charger(departements: list[str], sortie: Path) -> gpd.GeoDataFrame:
-    """Charge les extraits des départements concernés, ou refuse."""
+def charger(departements: list[str], sortie: Path,
+            ecartes: dict[str, set[str]] | None = None) -> gpd.GeoDataFrame:
+    """Charge les extraits des départements concernés, ou refuse.
+
+    `ecartes` dit, par département, les types de zonages à laisser de côté
+    parce que l'équipe a déposé sa propre couche pour ce département — voir
+    `service.fusionner_sources_locales`. Le tri se fait **avant** la fusion
+    des départements : c'est là, et seulement là, qu'on sait de quel
+    département vient chaque ligne.
+    """
     courant = etat(sortie)
     disponibles = courant.departements if courant else []
     manquants = [d for d in departements
@@ -220,7 +228,14 @@ def charger(departements: list[str], sortie: Path) -> gpd.GeoDataFrame:
     if manquants:
         raise DepartementAbsent(manquants, disponibles)
 
-    morceaux = [gpd.read_parquet(sortie / f"dep-{d}.parquet") for d in departements]
+    ecartes = ecartes or {}
+    morceaux = []
+    for d in departements:
+        morceau = gpd.read_parquet(sortie / f"dep-{d}.parquet")
+        types = ecartes.get(str(d))
+        if types:
+            morceau = morceau[~morceau["_type"].isin(types)]
+        morceaux.append(morceau)
     tout = gpd.GeoDataFrame(pd.concat(morceaux, ignore_index=True),
                             crs=CRS_METRIQUE)
     # Un zonage à cheval sur deux départements figure dans les deux extraits.
@@ -228,7 +243,8 @@ def charger(departements: list[str], sortie: Path) -> gpd.GeoDataFrame:
 
 
 def croiser(emprise_union, departements: list[str], sortie: Path,
-            aires: list[mod_zonages.AireEtude] | None = None) -> mod_zonages.Resultat:
+            aires: list[mod_zonages.AireEtude] | None = None,
+            ecartes: dict[str, set[str]] | None = None) -> mod_zonages.Resultat:
     """Croise l'emprise avec les extraits, comme `zonages.croiser` le fait
     avec les archives nationales. Même résultat, mêmes familles."""
     aires = aires or [mod_zonages.AireEtude(c, l, r)
@@ -236,7 +252,7 @@ def croiser(emprise_union, departements: list[str], sortie: Path,
     portee = max(a.rayon_m for a in aires)
     res = mod_zonages.Resultat()
 
-    tout = charger(departements, sortie)
+    tout = charger(departements, sortie, ecartes)
     courant = etat(sortie)
     res.journal.append(
         f"Extraits {', '.join(departements)} — {len(tout)} zonages"
