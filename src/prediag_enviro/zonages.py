@@ -1130,6 +1130,50 @@ _TYPES_EP = {
     "Terrain acquis par le Conservatoire du Littoral":
         "Terrain du Conservatoire du Littoral",
     "Zone humide protégée par la convention de Ramsar": "Site Ramsar",
+
+    # Ajoutés après la relecture de la responsable environnement, qui les
+    # consulte un à un dans QGIS via le flux WFS de l'INPN. Ils étaient déjà
+    # dans l'archive que l'outil télécharge : c'est la lecture qui s'arrêtait
+    # à quatorze types sur trente-deux.
+    "Périmètre de protection d’une réserve naturelle nationale":
+        "Périmètre de protection d'une réserve naturelle nationale",
+    "Périmètre de protection d’une réserve naturelle régionale ou de Corse":
+        "Périmètre de protection d'une réserve naturelle régionale",
+    "Zone de protection renforcée d'une réserve naturelle nationale":
+        "Zone de protection renforcée d'une réserve naturelle",
+    "Réserve intégrale de parc national": "Réserve intégrale de parc national",
+    "Réserve nationale de chasse et de faune sauvage":
+        "Réserve nationale de chasse et de faune sauvage",
+    # Les trois zones concentriques d'une réserve de biosphère restent
+    # distinctes : un projet en zone centrale et un projet en zone de
+    # transition n'appellent pas le même propos.
+    "Réserve de Biosphère, zone centrale": "Réserve de biosphère (zone centrale)",
+    "Réserve de Biosphère, zone tampon": "Réserve de biosphère (zone tampon)",
+    "Réserve de Biosphère, zone de transition":
+        "Réserve de biosphère (zone de transition)",
+    # Patrimoine géologique : l'outil portait déjà l'inventaire (INPG), pas
+    # les actes qui protègent.
+    "Arrêté de protection de géotope": "Arrêté de protection de géotope",
+    "Arrêté listes de sites d'intérêt géologique":
+        "Arrêté de liste de sites d'intérêt géologique",
+    "Géoparcs mondiaux UNESCO": "Géoparc mondial UNESCO",
+    "Bien inscrit sur la liste du patrimoine mondial de l'UNESCO":
+        "Bien du patrimoine mondial de l'UNESCO",
+}
+
+#: Protections de PAYSAGE, et non de nature. L'archive les porte au même
+#: endroit que les précédentes, mais elles ne relèvent pas de l'inventaire
+#: réglementaire biodiversité : un site classé protège une perspective, pas
+#: un habitat. Elles sont donc extraites dans leur propre famille, que ni les
+#: cartes ni l'état initial ne parcourent — elles attendent la partie du
+#: prédiagnostic qui traitera du paysage.
+#:
+#: Le flux WFS que consulte la responsable environnement ne les sert pas :
+#: c'est l'archive qui est ici plus riche que le flux.
+_TYPES_EP_PAYSAGE = {
+    "Site classé selon la loi de 1930": "Site classé",
+    "Grand Site de France": "Grand Site de France",
+    "Projet de Grand Site de France": "Projet de Grand Site de France",
 }
 
 
@@ -1209,11 +1253,12 @@ def _enrichir_ep(gdf, chemin: Path):
     return gdf
 
 
-def _source_ep(libelle: str, types: tuple[str, ...]) -> SourceZonage:
+def _source_ep(libelle: str, types: tuple[str, ...],
+               famille: str = "autres") -> SourceZonage:
     return SourceZonage(
         cle="ep_" + libelle.lower().replace(" ", "_")[:24],
         archive="espaces_proteges", motif_shp="sig_metrop.gpkg",
-        famille="autres", type_libelle=libelle,
+        famille=famille, type_libelle=libelle,
         colonnes_id=("id_mnhn",), colonnes_nom=("nom",),
         colonnes_interet=(),
         enrichir=_enrichir_ep,
@@ -1258,6 +1303,15 @@ def registre() -> list[SourceZonage]:
         groupes.setdefault(affiche, []).append(brut)
     sources += [_source_ep(affiche, tuple(bruts))
                 for affiche, bruts in groupes.items()]
+    # Les protections paysagères, dans leur propre famille. Elles sont donc
+    # extraites et présentes dans les parquets, mais `FAMILLES` ne les cite
+    # pas : ni carte ni tableau ne les reprend aujourd'hui. C'est voulu —
+    # elles relèvent d'une partie du prédiagnostic qui reste à écrire.
+    paysage: dict[str, list[str]] = {}
+    for brut, affiche in _TYPES_EP_PAYSAGE.items():
+        paysage.setdefault(affiche, []).append(brut)
+    sources += [_source_ep(affiche, tuple(bruts), famille="paysage")
+                for affiche, bruts in paysage.items()]
     sources.append(SourceZonage(
         cle="inpg", archive="patrimoine_geologique", motif_shp="metrop",
         famille="autres", type_libelle="Site d'intérêt géologique (INPG)",
