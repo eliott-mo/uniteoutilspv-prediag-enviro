@@ -338,6 +338,45 @@ def _remplir_bandeau(ax, lignes_titre, poignees, source):
 
 # ──────────────────────────────────────────────────────── tracé ──
 
+#: Dossier de cache des tuiles, mis en place une seule fois.
+_CACHE_POSE = False
+
+
+def _cacher_tuiles() -> None:
+    """Range les tuiles sur le disque plutôt que de les redemander.
+
+    Une planche reproduite pour le même site ne redemande alors rien, et le
+    service public s'en trouve d'autant moins sollicité — le même souci que
+    celui qui fait écarter le serveur de tuiles d'OpenStreetMap.
+    """
+    global _CACHE_POSE
+    if _CACHE_POSE:
+        return
+    try:
+        from . import chemins
+
+        dossier = chemins.referentiels() / "_cache_tuiles"
+        dossier.mkdir(parents=True, exist_ok=True)
+        cx.set_cache_dir(str(dossier))
+    except Exception:  # noqa: BLE001
+        pass
+    _CACHE_POSE = True
+
+
+def _zoom_automatique(ax) -> int | None:
+    """Le zoom que contextily choisirait, pour pouvoir en descendre."""
+    try:
+        from contextily.tile import _calculate_zoom, _sm2ll
+
+        x0, x1 = ax.get_xlim()
+        y0, y1 = ax.get_ylim()
+        w, s = _sm2ll(x0, y0)
+        e, n = _sm2ll(x1, y1)
+        return _calculate_zoom(w, s, e, n)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _poser_fond(ax, tentatives: int = 3) -> bool:
     """Pose le fond de plan, avec reprises.
 
@@ -349,17 +388,41 @@ def _poser_fond(ax, tentatives: int = 3) -> bool:
     """
     import time
 
-    for tentative in range(tentatives):
-        try:
-            cx.add_basemap(ax, source=FOND["url"], crs=f"EPSG:{CRS_AFFICHAGE}",
-                           attribution_size=5)
-            return True
-        except Exception as erreur:  # noqa: BLE001
-            if tentative == tentatives - 1:
-                print(f"    [fond] indisponible apres {tentatives} tentatives :"
-                      f" {erreur}")
-                return False
-            time.sleep(2 * (tentative + 1))
+    _cacher_tuiles()
+    # Le service limite le débit : plus la mosaïque demande de tuiles, plus
+    # elle échoue. Mesuré un soir de production répétée, le zoom 10 passait
+    # quand les zooms 11 à 14 tombaient tous. Contextily ne sait pas composer
+    # avec une tuile manquante — il en garde un None et lève bien plus loin,
+    # dans l'assemblage.
+    #
+    # On réessaie donc en descendant d'un cran de zoom à chaque échec. Un
+    # fond un peu moins détaillé reste un fond ; une carte blanche n'est pas
+    # une carte.
+    # Un seul cran de repli, et pas deux : les toponymes du fond sont gravés
+    # à la taille de leur zoom, si bien qu'un cran les double et deux les
+    # quadruplent. Au zoom 11 pour un cadre de zoom 13, « St-Pierre-lès-Elbeuf »
+    # barre la carte — on aurait troqué un fouillis contre un autre.
+    automatique = _zoom_automatique(ax)
+    niveaux = [None] if automatique is None else [automatique, automatique - 1]
+    for rang, zoom in enumerate(niveaux):
+        for tentative in range(tentatives):
+            try:
+                cx.add_basemap(ax, source=FOND["url"],
+                               crs=f"EPSG:{CRS_AFFICHAGE}",
+                               attribution_size=5,
+                               **({} if zoom is None else {"zoom": zoom}))
+                if rang:
+                    print(f"    [fond] posé au zoom {zoom} au lieu de "
+                          f"{automatique} — service limité")
+                return True
+            except Exception as erreur:  # noqa: BLE001
+                dernier = (rang == len(niveaux) - 1
+                           and tentative == tentatives - 1)
+                if dernier:
+                    print(f"    [fond] indisponible apres {tentatives} "
+                          f"tentatives sur {len(niveaux)} zooms : {erreur}")
+                    return False
+                time.sleep(2 * (tentative + 1))
     return False
 
 
