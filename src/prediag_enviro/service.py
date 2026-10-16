@@ -16,6 +16,7 @@ from pathlib import Path
 
 import yaml
 
+from . import reference as reference_mod
 from . import (bdc, chemins, classeurs, extraits, referentiels,
                sources_locales, taxref, veille, zonages)
 from .memoire import Memoire
@@ -39,6 +40,21 @@ class Contexte:
     citations: list[str]
     versions: dict[str, referentiels.Referentiel]
     racine: Path
+    #: Les classeurs UNITe, qui font foi pour les statuts du prédiagnostic.
+    #: `None` quand aucun classeur n'est en place — une installation neuve,
+    #: par exemple.
+    reference: "reference_mod.Reference | None" = None
+
+    @property
+    def source_statuts(self):
+        """Où lire un statut : le classeur s'il est là, BDC sinon.
+
+        La règle arrêtée en octobre 2026 est que le classeur fait foi. Le
+        repli sur BDC ne la contredit pas : il évite qu'une installation sans
+        classeur ne produise des tableaux vides sans rien dire. Le document
+        nomme sa source, de sorte qu'on sait toujours laquelle a servi.
+        """
+        return self.reference or self.statuts
 
     @property
     def resume_versions(self) -> str:
@@ -81,8 +97,20 @@ def charger_contexte(racine: Path, forcer: bool = False,
                                   spec_bdc["membres"]["principal"],
                                   spec_bdc["version"], dossier / "bdc_index.pkl")
 
+    # Les classeurs sont légers — 5 Mo — et le prédiagnostic ne peut pas
+    # s'en passer : on les lit ici plutôt que de les demander plus tard.
+    try:
+        cs = charger_classeurs(racine)
+    except Exception:  # noqa: BLE001
+        cs = {}
+    ref = reference_mod.Reference(cs) if cs else None
+    if ref is not None:
+        citations.append(
+            f"Statuts : classeurs UNITe, {len(ref)} taxons, tenus par la "
+            f"responsable environnement"
+        )
     return Contexte(index=index, statuts=statuts, citations=citations,
-                    versions=refs, racine=racine)
+                    versions=refs, racine=racine, reference=ref)
 
 
 def charger_classeurs(racine: Path) -> dict[str, classeurs.Classeur]:

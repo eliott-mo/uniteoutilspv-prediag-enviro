@@ -396,7 +396,7 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
     enjeu, parce que c'est sur elles que porte le raisonnement ; l'**annexe**
     donne la liste exhaustive, qui fait foi sur ce qui a été consulté.
     """
-    statuts, index = contexte.statuts, contexte.index
+    statuts, index = contexte.source_statuts, contexte.index
     cd_refs = [e.cd_ref for e in especes]
     jeu = se.jeu(groupe, statuts, cd_refs, projet.departements)
     retenues = ([e for e in especes if se.a_enjeu(jeu, statuts, e.cd_ref)]
@@ -578,10 +578,10 @@ def _compter_par_famille_etude(resultat, contexte) -> dict[str, tuple[int, int]]
     comptes: dict[str, list[int]] = {}
     for cle_groupe, especes in par_groupe.items():
         groupe = se.groupe_par_cle(cle_groupe)
-        jeu = se.jeu(groupe, contexte.statuts, [e.cd_ref for e in especes],
-                     [])
+        jeu = se.jeu(groupe, contexte.source_statuts,
+                     [e.cd_ref for e in especes], [])
         enjeu = sum(1 for e in especes
-                    if se.a_enjeu(jeu, contexte.statuts, e.cd_ref))
+                    if se.a_enjeu(jeu, contexte.source_statuts, e.cd_ref))
         famille = se.famille_etude(cle_groupe)
         cumul = comptes.setdefault(famille, [0, 0])
         cumul[0] += len(especes)
@@ -628,9 +628,15 @@ def _annexes(rapport: Rapport, projet: Projet, resultat, contexte) -> list[str]:
         rapport.orientation(paysage=avant)
         return []
 
+    provenance = (
+        f"les classeurs de référence d'UNITe ({len(contexte.reference)} taxons), "
+        "tenus à jour par la responsable environnement"
+        if contexte.reference is not None else
+        f"BDC-Statuts (INPN, version {contexte.statuts.version})"
+    )
     rapport.para(
-        "Les statuts ci-dessous sont lus dans BDC-Statuts "
-        f"(INPN, version {contexte.statuts.version}) et non saisis à la main. "
+        f"Les statuts ci-dessous sont lus dans {provenance} et non saisis à "
+        "la main. "
         "Une espèce est retenue comme présentant un enjeu — dans l'état "
         "initial — lorsqu'elle est protégée, inscrite aux annexes de la "
         "directive Habitats ou Oiseaux, classée NT, VU, EN, CR, RE ou EX sur "
@@ -701,7 +707,7 @@ def _especes_a_pna(resultat, contexte) -> list[str]:
         return []
     noms = []
     for espece in resultat.especes:
-        if not contexte.statuts.entrees(espece.cd_ref, "PNA", "France"):
+        if not contexte.source_statuts.entrees(espece.cd_ref, "PNA", "France"):
             continue
         taxon = contexte.index.taxons.get(espece.cd_ref)
         nom = nom_vernaculaire(
