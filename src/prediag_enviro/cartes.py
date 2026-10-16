@@ -104,10 +104,30 @@ class Carte:
 
 # ───────────────────────────────────────────────────────── étiquettes ──
 
-def _halo(ax, x, y, texte, couleur="black", taille=7.5, epaisseur=2.5, **kw):
+def _est_clair(couleur: str) -> bool:
+    """La couleur est-elle trop claire pour porter un liseré blanc ?"""
+    from matplotlib.colors import to_rgb
+    try:
+        r, v, b = to_rgb(couleur)
+    except Exception:  # noqa: BLE001
+        return False
+    return (0.299 * r + 0.587 * v + 0.114 * b) > 0.6
+
+
+def _halo(ax, x, y, texte, couleur="black", taille=7.5, epaisseur=2.5,
+          fond=None, **kw):
+    """Texte cerné d'un liseré, pour se détacher de n'importe quel fond.
+
+    Le liseré était blanc en dur. Les noms des grands zonages, écrits en
+    blanc à l'intérieur de l'aplat comme le fait le prédiagnostic de
+    référence, s'y noyaient : du blanc cerné de blanc ne se lit pas. Le
+    liseré suit donc la couleur du texte — sombre sous un texte clair.
+    """
+    if fond is None:
+        fond = "#2b2b2b" if _est_clair(couleur) else "white"
     return ax.text(x, y, texte, color=couleur, fontsize=taille, fontweight="bold",
                    path_effects=[pe.withStroke(linewidth=epaisseur,
-                                               foreground="white")],
+                                               foreground=fond)],
                    zorder=10, **kw)
 
 
@@ -134,7 +154,7 @@ def _positions_candidates(largeur, hauteur, genre):
     return ([(0, 0)] if genre == "zone" else []) + anneaux
 
 
-def _placer_etiquettes(ax, demandes, obstacles=None, taille=7.5):
+def _placer_etiquettes(ax, demandes, obstacles=None, taille=6.5):
     """Place les étiquettes sans masquer ni se masquer, avec ligne de rappel.
 
     `demandes` : (x, y, texte, couleur, genre) en coordonnées d'affichage.
@@ -176,6 +196,13 @@ def _placer_etiquettes(ax, demandes, obstacles=None, taille=7.5):
             if recouvrement_min is None or recouvrement < recouvrement_min:
                 meilleur, recouvrement_min = (cx_, cy_), recouvrement
 
+        if meilleur is None or recouvrement_min:
+            # Aucune position libre : on retire l'étiquette plutôt que de
+            # l'empiler sur les précédentes. Une carte où tout est écrit est
+            # une carte où rien ne se lit, et le tableau d'en face porte le
+            # nom de chaque zonage.
+            etiquette.remove()
+            continue
         cx_, cy_ = meilleur
         etiquette.set_position(inverse.transform((cx_, cy_)))
         occupe.append(etiquette.get_window_extent(rendu))
@@ -360,6 +387,38 @@ def _rang_type(type_libelle: str) -> int:
         return len(_ORDRE_TYPES)
 
 
+#: Part du cadre qu'un polygone doit occuper pour porter son nom en entier.
+#: Au-dessous, il reçoit son identifiant — court, d'une seule ligne.
+_PORTE_SON_NOM = (0.16, 0.07)
+
+
+def _etiquette_zonage(ligne, largeur_cadre: float,
+                      hauteur_cadre: float) -> tuple[str, str]:
+    """Le texte d'une étiquette et sa couleur, selon la place disponible.
+
+    Le prédiagnostic de référence fait ainsi, et sa carte des ZNIEFF se lit :
+    les grandes ZNIEFF de type II portent leur nom en capitales pâles, posé
+    à l'intérieur ; les petites ZNIEFF de type I ne portent que leur numéro,
+    en rouge, à côté. Le lecteur retrouve le nom dans la colonne
+    « Identifiant » du tableau, en face.
+
+    L'outil écrivait le nom complet sur chaque polygone, en gras, replié
+    jusqu'à quatre lignes. Sur vingt-quatre ZNIEFF, les pavés de texte
+    recouvraient la carte — « les noms sont écrits par-dessus les zonages
+    donc on ne voit plus rien », a écrit la responsable environnement.
+    """
+    x0, y0, x1, y1 = ligne.geometry.bounds
+    assez_large = (x1 - x0) >= largeur_cadre * _PORTE_SON_NOM[0]
+    assez_haut = (y1 - y0) >= hauteur_cadre * _PORTE_SON_NOM[1]
+    nom = str(ligne.get("_nom") or "").strip()
+    if nom and assez_large and assez_haut:
+        # Capitales pâles à l'intérieur du polygone : le texte se lit sans
+        # masquer l'aplat, qui reste visible au travers.
+        return _replier(nom.upper(), 30, 2), "#ffffff"
+    identifiant = str(ligne.get("_id") or "").strip()
+    return (identifiant or _replier(nom, 18, 1)), "#8e2f2a"
+
+
 def _dessiner_zonages(ax, couches, cadre_l93):
     """Dessine les zonages d'une famille. Renvoie (poignées, étiquettes)."""
     # Découpage dans la projection d'AFFICHAGE : couper en Lambert-93 puis
@@ -388,11 +447,13 @@ def _dessiner_zonages(ax, couches, cadre_l93):
             poignees.append(Patch(facecolor=couleur, edgecolor=couleur,
                                   alpha=0.45, linestyle=style, label=type_zonage))
             vus.add(type_zonage)
+        x0, y0, x1, y1 = cadre_affichage.bounds
+        largeur_cadre, hauteur_cadre = x1 - x0, y1 - y0
         for _, ligne in decoupe.iterrows():
             point = ligne.geometry.representative_point()
-            etiquettes.append((point.x, point.y,
-                               _replier(ligne.get("_nom") or "", 22, 4),
-                               couleur, "zone"))
+            etiquettes.append(
+                (point.x, point.y) + _etiquette_zonage(
+                    ligne, largeur_cadre, hauteur_cadre) + ("zone",))
     return poignees, etiquettes
 
 
