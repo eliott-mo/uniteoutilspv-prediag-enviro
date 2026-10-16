@@ -342,6 +342,95 @@ def _remplir_bandeau(ax, lignes_titre, poignees, source):
 _CACHE_POSE = False
 
 
+def _tuile_avec_reprise(tile_url, wait, max_retries, headers):
+    """Télécharge une tuile, et rend bien ce qu'elle a fini par rendre.
+
+    **Contextily 1.7.0 perd la tuile dès qu'il doit la redemander.** Dans sa
+    branche de reprise, le résultat de l'appel récursif est affecté à une
+    variable locale et jamais renvoyé :
+
+        if max_retries > 0:
+            ...
+            request = _retryer(tile_url, wait, max_retries, headers)
+        else:
+            raise requests.HTTPError(...)
+
+    La fonction tombe alors en fin de bloc et rend `None`. La tuile manquante
+    ne se voit pas tout de suite : elle casse l'assemblage bien plus loin, sur
+    un « int() argument must be a string… not NoneType » qui ne dit rien de sa
+    cause. C'est ce qui laissait les planches sans fond de plan — le Plan IGN
+    limite le débit et répond 429 sur quelques tuiles d'une mosaïque, et
+    chaque reprise réussie était jetée.
+
+    On réécrit donc la reprise en boucle plutôt qu'en récursion, ce qui ôte
+    l'occasion même de l'oubli. Le reste est le comportement de contextily :
+    404 abandonne tout de suite — la tuile n'existe pas, la redemander n'y
+    changera rien —, les autres erreurs patientent puis réessaient.
+    """
+    import io
+    import time
+
+    import numpy as np
+    import requests
+    from PIL import Image, UnidentifiedImageError
+
+    from contextily.tile import USER_AGENT
+
+    for restantes in range(max_retries, -1, -1):
+        reponse = requests.get(
+            tile_url, headers={"user-agent": USER_AGENT, **headers})
+        if reponse.status_code == 404:
+            # La tuile n'existe pas : la redemander n'y changera rien.
+            raise requests.HTTPError(
+                "Tile URL resulted in a 404 error. "
+                "Double-check your tile url:\n{}".format(tile_url))
+        try:
+            reponse.raise_for_status()
+            with io.BytesIO(reponse.content) as flux:
+                image = Image.open(flux).convert("RGBA")
+                tableau = np.asarray(image)
+                image.close()
+                return tableau
+        except (requests.HTTPError, UnidentifiedImageError):
+            if restantes <= 0:
+                raise requests.HTTPError(
+                    "Connection reset by peer too many times.\n{}".format(
+                        tile_url))
+            time.sleep(wait)
+    raise requests.HTTPError(tile_url)
+
+
+def _purger_tuiles_perdues(dossier) -> int:
+    """Retire du cache les tuiles enregistrées à `None`.
+
+    joblib garde ce que la fonction a rendu, `None` compris : réparer la
+    reprise ne suffit donc pas, les tuiles déjà perdues le resteraient d'un
+    lancement à l'autre et la carte ne retrouverait jamais son fond.
+
+    On ne relit pas tout le cache pour autant. Une tuile pèse des dizaines de
+    kilo-octets, un `None` une vingtaine d'octets : seuls les fichiers
+    minuscules sont ouverts, ce qui rend le balayage négligeable.
+    """
+    import pickle
+
+    retires = 0
+    for sortie in dossier.rglob("output.pkl"):
+        try:
+            if sortie.stat().st_size > 512:
+                continue
+            charge = pickle.loads(sortie.read_bytes())
+            contenu = (charge[0] if isinstance(charge, tuple) and len(charge) == 1
+                       else charge)
+            if contenu is None:
+                for fichier in sortie.parent.iterdir():
+                    fichier.unlink()
+                sortie.parent.rmdir()
+                retires += 1
+        except Exception:  # noqa: BLE001
+            continue
+    return retires
+
+
 def _cacher_tuiles() -> None:
     """Range les tuiles sur le disque plutôt que de les redemander.
 
@@ -358,6 +447,14 @@ def _cacher_tuiles() -> None:
         dossier = chemins.referentiels() / "_cache_tuiles"
         dossier.mkdir(parents=True, exist_ok=True)
         cx.set_cache_dir(str(dossier))
+        perdues = _purger_tuiles_perdues(dossier)
+        if perdues:
+            print(f"    [fond] {perdues} tuile(s) vide(s) retirée(s) du cache")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from contextily import tile as _tuiles
+        _tuiles._retryer = _tuile_avec_reprise
     except Exception:  # noqa: BLE001
         pass
     _CACHE_POSE = True
