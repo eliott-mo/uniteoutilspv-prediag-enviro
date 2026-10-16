@@ -387,10 +387,13 @@ with onglet_a:
                 "reviendra que si la source rebouge."
             )
 
-            mesures = st.columns(4)
+            # Une colonne par famille, plus celle des arbitrages : le zip
+            # consommait les quatre colonnes dès qu'une famille s'est ajoutée,
+            # et « Déjà arbitrés » écrasait la dernière.
+            mesures = st.columns(len(veille.FAMILLES) + 1)
             for colonne, (cle, titre) in zip(mesures, veille.FAMILLES):
                 colonne.metric(titre.split(" ", 1)[1], len(res.par_famille(cle)))
-            mesures[3].metric("Déjà arbitrés", masques,
+            mesures[-1].metric("Déjà arbitrés", masques,
                               help="Constats masqués parce que vous les avez déjà "
                                    "tranchés et que la source n'a pas rebougé.")
 

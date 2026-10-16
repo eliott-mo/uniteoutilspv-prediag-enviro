@@ -50,7 +50,7 @@ csv.field_size_limit(10 ** 7)
 #: sur disque est validé par la version du référentiel, qui ne bouge pas quand
 #: c'est notre code qui change. Sans ce garde-fou, un index construit par une
 #: version antérieure se recharge et rend des cellules vides sans rien dire.
-FORMAT = 4
+FORMAT = 5
 
 #: Types de statuts exploités par la veille (les autres sont lus mais ignorés).
 TYPES_SUIVIS = {"LRE", "LRN", "LRR", "LRM", "ZDET", "PN", "PR", "PD", "DH", "DO", "PNA"}
@@ -178,10 +178,17 @@ class Statuts:
     """Index des statuts BDC, interrogeable par (cd_ref, type, territoire)."""
 
     def __init__(self, table: dict[tuple[str, str, str], list[Entree]],
-                 version: str, territoires: dict[str, set[str]]):
+                 version: str, territoires: dict[str, set[str]],
+                 types_cites: frozenset[str] = frozenset()):
         self._table = table
         self.version = version
         self.territoires = territoires
+        #: Types dont BDC porte une référence bibliographique. Mesuré sur la
+        #: v18 : 22 des 24 types sont cités à 100 %, `LRE` et `LRM` ne le sont
+        #: pas du tout — 5 831 et 19 461 lignes sans la moindre source. On le
+        #: déduit du fichier plutôt que de l'inscrire en dur : si une édition
+        #: future comble le trou, la veille s'y adaptera sans qu'on y touche.
+        self.types_cites = frozenset(types_cites)
 
     # ------------------------------------------------------------ construction
 
@@ -190,6 +197,7 @@ class Statuts:
         z = zipfile.ZipFile(archive)
         table: dict[tuple[str, str, str], list[Entree]] = defaultdict(list)
         territoires: dict[str, set[str]] = defaultdict(set)
+        cites: set[str] = set()
 
         with z.open(membre) as f:
             flux = io.TextIOWrapper(f, encoding="utf-8", errors="replace", newline="")
@@ -212,8 +220,12 @@ class Statuts:
                 if entree not in table[cle]:
                     table[cle].append(entree)
                 territoires[type_statut].add(terr)
+                if citation:
+                    cites.add(type_statut)
 
-        return cls(dict(table), version, {k: set(v) for k, v in territoires.items()})
+        return cls(dict(table), version,
+                   {k: set(v) for k, v in territoires.items()},
+                   frozenset(cites))
 
     @classmethod
     def charger(cls, archive: Path, membre: str, version: str,
@@ -223,7 +235,8 @@ class Statuts:
                 donnees = pickle.loads(cache.read_bytes())
                 if (donnees.get("version") == version
                         and donnees.get("format") == FORMAT):
-                    return cls(donnees["table"], version, donnees["territoires"])
+                    return cls(donnees["table"], version, donnees["territoires"],
+                               donnees.get("types_cites", frozenset()))
             except Exception:  # noqa: BLE001
                 pass
         index = cls.construire(archive, membre, version)
@@ -232,6 +245,7 @@ class Statuts:
             cache.write_bytes(pickle.dumps({
                 "table": index._table, "version": version, "format": FORMAT,
                 "territoires": index.territoires,
+                "types_cites": index.types_cites,
             }))
         return index
 
@@ -239,6 +253,17 @@ class Statuts:
 
     def __len__(self) -> int:
         return len(self._table)
+
+    def cite(self, type_statut: str) -> bool:
+        """BDC dit-il d'où vient ce type de statut ?
+
+        La Licence Ouverte impose de citer la source **et** la date. Pour les
+        deux types que BDC ne référence pas, on ne peut donc ni citer sa
+        valeur, ni dater l'édition qu'elle reflète — et donc pas davantage
+        affirmer qu'elle prime sur celle d'un classeur qui, lui, nomme sa
+        source. La veille s'en sert pour constater sans proposer.
+        """
+        return type_statut in self.types_cites
 
     def entrees(self, cd_ref: str, type_statut: str,
                 territoire: str) -> list[Entree]:

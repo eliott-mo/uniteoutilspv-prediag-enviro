@@ -74,6 +74,26 @@ def normaliser_code(valeur: str, type_statut: str) -> str | None:
     return majuscule if majuscule in _CATEGORIES_UICN else majuscule
 
 
+def categorie_valide(valeur: str) -> bool:
+    """La valeur appartient-elle à la nomenclature UICN ?
+
+    Contrôle de forme, sans référentiel externe : il tient lieu de garde-fou
+    là où la confrontation à BDC a été retirée faute de source citable.
+
+    Il ne vaut que pour les colonnes dont la nomenclature est pure. Mesuré sur
+    les classeurs : les 1 388 valeurs européennes le sont toutes, mais 446
+    valeurs nationales et régionales portent d'anciennes échelles — « 4 »,
+    « R », « V », « FORT », « - ǀ 3 ǀ - » — héritées de listes antérieures à
+    l'UICN. Les signaler serait crier au loup sur des valeurs voulues.
+    """
+    v = _nettoyer(valeur).upper()
+    if not v:
+        return True
+    if v.startswith("NA"):
+        return True      # NA, NAa, NAb… : non applicable, décliné par critère
+    return v.rstrip("*") in _CATEGORIES_UICN
+
+
 def equivalents(cote_classeur: str, cote_bdc: str, type_statut: str) -> bool:
     """Les deux écritures désignent-elles le même statut ?"""
     a = normaliser_code(cote_classeur, type_statut)
