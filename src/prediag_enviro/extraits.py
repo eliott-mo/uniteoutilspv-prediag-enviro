@@ -164,7 +164,15 @@ def construire(departements: list[str], archives_dir: Path, cache: Path,
         tout.to_parquet(chemin, compression="zstd")
         construits.append(departement)
 
-    etat = EtatExtraits(departements=sorted(construits),
+    # Le manifeste recense ce qui EST sur le disque, pas ce que cet appel
+    # vient de faire. Reconstruire un seul département ne doit pas effacer la
+    # mémoire des quatre-vingt-quinze autres : le manifeste sert à dire ce qui
+    # est disponible quand un projet sort du périmètre construit, et il
+    # annonçait « 95 » tout seul après une reconstruction département par
+    # département, alors que les 96 fichiers étaient bien là.
+    presents = sorted({c.stem.removeprefix("dep-")
+                       for c in sortie.glob("dep-*.parquet")} | set(construits))
+    etat = EtatExtraits(departements=presents,
                         versions=dict(versions or {}),
                         construit_le=date.today().isoformat())
     (sortie / MANIFESTE).write_text(
