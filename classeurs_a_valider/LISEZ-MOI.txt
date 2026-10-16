@@ -20,3 +20,17 @@ Ce qui est contrôlé avant bascule :
 
 Les fichiers déposés ici ne sont pas suivis par git : ce sont des données
 métier, et elles pèsent cinq mégaoctets.
+
+Historique des bascules
+-----------------------
+
+16/10/2026 — six classeurs révisés, reçus comme « base saine de départ ».
+Contrôle : aucun écart de contenu avec la version en place. Les 55 000 cellules
+des onglets communs sont identiques au caractère près, et les 550 440 statuts
+rendus par la référence construite le sont aussi. Seul changement du lot : le
+classeur des oiseaux a perdu quatre onglets de travail — « Statuts toute
+Europe » (1 058 oiseaux d'Europe, qui alimentaient sa colonne « Liste rouge
+Europe ») et trois formulaires de relevé vierges. Aucun n'est lu par l'outil.
+Les noms de fichiers portent désormais les accents ; les motifs de `MOTIFS` les
+reconnaissent. Version précédente conservée dans
+%LOCALAPPDATA%\prediag-enviro\sauvegardes\classeurs_2026-10-16.
