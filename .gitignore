@@ -13,6 +13,14 @@ referentiels/*
 classeurs/*.xlsx
 classeurs/*.xls
 
+# Sas de validation : les classeurs qu'on vient de recevoir et qui n'ont pas
+# encore remplacé la référence. Même raison que ci-dessus, et une de plus —
+# un classeur déposé là n'a précisément pas encore été vérifié.
+classeurs_a_valider/*.xlsx
+classeurs_a_valider/*.xls
+!classeurs_a_valider/.gitkeep
+!classeurs_a_valider/LISEZ-MOI.txt
+
 # Sorties : rapports, documents, cartes. Le dossier entier, pas une liste
 # d'extensions — c'est en listant *.xlsx et *.csv qu'on a laissé partir 4,4 Mo
 # de cartes PNG dans le dépôt, après avoir déjà laissé passer 380 Mo de

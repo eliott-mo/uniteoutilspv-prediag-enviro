@@ -1,0 +1,22 @@
+SAS DE VALIDATION DES CLASSEURS
+===============================
+
+Déposez ici les classeurs UNITe reçus de la responsable environnement, avant
+qu'ils ne remplacent ceux de `classeurs/`.
+
+Pourquoi ne pas les mettre directement dans `classeurs/` : ce dossier est la
+référence que lit le prédiagnostic. Un classeur y atterrit après vérification,
+pas avant. Les six fichiers n'ont pas tous la même disposition — la feuille
+« Saisie étude » numérote ses colonnes à partir de 0 dans deux d'entre eux et
+de 1 dans les quatre autres — et une révision qui toucherait cette feuille
+changerait la lecture de tous les statuts.
+
+Ce qui est contrôlé avant bascule :
+
+  - la disposition des colonnes de chaque fichier ;
+  - les territoires et les types de statuts reconnus ;
+  - l'écart taxon par taxon avec la version en place ;
+  - l'effet mesuré sur un prédiagnostic réel.
+
+Les fichiers déposés ici ne sont pas suivis par git : ce sont des données
+métier, et elles pèsent cinq mégaoctets.
