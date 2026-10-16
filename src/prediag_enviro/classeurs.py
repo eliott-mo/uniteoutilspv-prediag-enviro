@@ -23,6 +23,7 @@ Rien n'est jamais écrit dans ces fichiers : voir `veille.py` pour les raisons.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -74,13 +75,21 @@ _PERIODES = ("Nicheurs", "Hivernants", "De passage")
 _ANNEE = re.compile(r"\b(19|20)\d{2}\b")
 
 
+def _plat(texte: str) -> str:
+    """Minuscules sans accents, pour comparer un en-tête à un libellé.
+
+    « Liste rouge Rhône-Alpes » et « Rhone-Alpes » doivent se reconnaître.
+    """
+    brut = unicodedata.normalize("NFD", str(texte or ""))
+    return brut.encode("ascii", "ignore").decode().lower()
+
+
 def _net(v) -> str:
     return re.sub(r"\s+", " ", str(v or "").replace("\n", " ")).strip()
 
 
 def _cle_territoire(libelle: str) -> str:
     """Forme comparable d'un nom de territoire (accents et tirets neutralisés)."""
-    import unicodedata
     s = unicodedata.normalize("NFD", str(libelle or "")).encode("ascii", "ignore").decode()
     s = re.sub(r"[^a-z0-9 ]", " ", s.lower().replace("-", " "))
     return re.sub(r"\s+", " ", s).strip()
@@ -154,6 +163,72 @@ class Classeur:
         return None
 
 
+#: Mots qu'on s'attend à lire dans l'en-tête de `Statuts`, selon le champ
+#: déclaré dans « Saisie étude ». Ils servent à vérifier l'alignement, pas à
+#: deviner le type : c'est `CHAMP_VERS_BDC` qui s'en charge.
+_ATTENDU_ENTETE = {
+    "LRE": ("europe",),
+    "LRM": ("monde",),
+    "PN": ("protection",),
+    "PR": ("protection",),
+    "LRF": ("rouge",),
+    "LRN": ("rouge",),
+    "LRR": ("rouge",),
+    "DZ": ("znieff",),
+    "ZDET": ("znieff",),
+}
+
+
+def _decalage(lignes: dict, entetes: list[str]) -> int:
+    """De combien décaler les numéros de « Saisie étude » pour tomber juste.
+
+    **Les six classeurs ne suivent pas la même convention.** Le classeur des
+    oiseaux numérote ses colonnes à partir de 1, ceux des mammifères et des
+    amphibiens-reptiles à partir de 0 : la colonne « Liste rouge Europe » des
+    mammifères est annoncée en 7 et se trouve bien en 7, celle des oiseaux est
+    annoncée en 6 et se trouve en 5.
+
+    Le code retranchait 1 sans vérifier. Il visait donc juste pour les
+    oiseaux et une colonne trop à gauche pour les autres — la veille
+    confrontait « Protection nationale » à la liste rouge européenne, et le
+    prédiagnostic aurait publié des articles d'arrêté dans une colonne de
+    liste rouge.
+
+    Plutôt que de choisir une convention et d'y soumettre les classeurs, on
+    essaie les deux et on garde celle dont les en-têtes concordent. Un
+    classeur futur qui adopterait l'autre convention sera lu correctement
+    sans qu'on y touche.
+    """
+    def score(decalage: int) -> int:
+        bons = 0
+        for i, brut in enumerate(lignes[5]):
+            if not brut.isdigit():
+                continue
+            champ = lignes[7][i] if i < len(lignes[7]) else ""
+            terr = lignes[6][i] if i < len(lignes[6]) else ""
+            cible = int(brut) + decalage
+            if not (0 <= cible < len(entetes)):
+                continue
+            entete = _plat(entetes[cible])
+            # Le territoire est le mot le plus distinctif quand il est là ;
+            # sinon on retombe sur ce qu'annonce le champ.
+            if terr and _plat(terr) and _plat(terr) in entete:
+                bons += 1
+                continue
+            racine = re.sub(r"(?i)\s*(nicheurs|hivernants|de passage)\s*",
+                            " ", champ).strip().upper()
+            attendus = _ATTENDU_ENTETE.get(racine)
+            if not attendus and racine.startswith("LRR"):
+                attendus = _ATTENDU_ENTETE["LRR"]
+            if attendus and any(m in entete for m in attendus):
+                bons += 1
+        return bons
+
+    # -1 d'abord : c'est l'ancien comportement, et il reste le bon pour les
+    # oiseaux. À égalité on ne change donc rien.
+    return max((-1, 0), key=score)
+
+
 def _dictionnaire_depuis_saisie(wb) -> tuple[list[ColonneStatut], list[str]]:
     """Lit les lignes 5/6/7 de « Saisie étude » : index, territoire, champ."""
     nom = next((n for n in wb.sheetnames if n.strip().lower().startswith("saisie")), None)
@@ -164,6 +239,10 @@ def _dictionnaire_depuis_saisie(wb) -> tuple[list[ColonneStatut], list[str]]:
     lignes = {i: [_net(c.value) for c in ws[i]] for i in (5, 6, 7)}
     if not any(v.isdigit() for v in lignes[5]):
         return [], ["« Saisie étude » ne porte pas les index de colonnes en ligne 5"]
+
+    entetes = ([_net(c.value) for c in wb["Statuts"][1]]
+               if "Statuts" in wb.sheetnames else [])
+    decalage = _decalage(lignes, entetes) if entetes else -1
 
     colonnes: list[ColonneStatut] = []
     territoire_courant = ""
@@ -185,7 +264,7 @@ def _dictionnaire_depuis_saisie(wb) -> tuple[list[ColonneStatut], list[str]]:
             type_bdc = "LRR"
 
         colonnes.append(ColonneStatut(
-            index=int(brut) - 1, champ=champ, type_bdc=type_bdc,
+            index=int(brut) + decalage, champ=champ, type_bdc=type_bdc,
             territoire=terr, territoire_bdc=territoire_bdc(terr),
             periode=periode,
         ))
