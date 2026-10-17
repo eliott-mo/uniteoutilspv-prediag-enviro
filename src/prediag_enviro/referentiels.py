@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import time
+import urllib.parse
 from dataclasses import dataclass, asdict
 from datetime import date
 from pathlib import Path
@@ -34,6 +35,9 @@ NOMS_AFFICHES = {
     "patrimoine_geologique": "Inventaire du patrimoine géologique",
     "ens": "Espaces naturels sensibles (flux WFS de l'INPN)",
     "zico": "Zones importantes pour la conservation des oiseaux (flux WFS)",
+    "mc_polygones": "Mesures compensatoires — emprises surfaciques (CEREMA)",
+    "mc_lineaires": "Mesures compensatoires — emprises linéaires (CEREMA)",
+    "mc_ponctuelles": "Mesures compensatoires — emprises ponctuelles (CEREMA)",
 }
 
 
@@ -44,10 +48,20 @@ class Referentiel:
     chemin: Path             # archive locale
     recupere_le: str         # ISO date
     url: str
+    #: Producteur de ce référentiel-ci, quand ce n'est pas celui que
+    #: `sources.yml` déclare pour l'ensemble. Les mesures compensatoires
+    #: viennent du Cerema et non du Muséum : les citer sous l'attribution
+    #: globale était une faute de licence autant qu'une erreur de fait.
+    attribution: str = ""
 
     def citation(self, attribution: str) -> str:
-        """Mention de paternité exigée par la Licence Ouverte."""
+        """Mention de paternité exigée par la Licence Ouverte.
+
+        L'attribution propre au référentiel l'emporte sur celle du fichier de
+        configuration, qui ne vaut que par défaut.
+        """
         nom = NOMS_AFFICHES.get(self.cle, self.cle)
+        attribution = self.attribution or attribution
         # Un flux ne publie pas de version : sa date de récupération en tient
         # lieu, et c'est elle que la Licence Ouverte exige de citer. Écrire
         # « v » suivi de rien ferait croire à une version perdue.
@@ -131,6 +145,84 @@ def telecharger(url: str, dest: Path, attendu: int | None = None,
     return dest
 
 
+#: Nom de la couche écrite dans le GeoPackage d'un flux paginé.
+COUCHE_PAGINEE = "objets"
+
+
+def telecharger_wfs_pagine(url: str, dest: Path, pas: int = 5000) -> Path:
+    """Récupère un flux WFS que le serveur sert par tranches.
+
+    **La Géoplateforme plafonne une requête WFS à 5 000 objets, sans le
+    dire.** Les 8 086 emprises surfaciques des mesures compensatoires
+    arrivaient donc tronquées à 5 000, et rien dans la réponse ne le
+    signalait : même code HTTP, même archive bien formée, 3 086 objets en
+    moins. Demander `COUNT=20000` n'y change rien — la charge utile revient
+    identique à l'octet près, le plafond est côté serveur.
+
+    On pagine donc avec `STARTINDEX`, et **on confronte le total obtenu au
+    `numberMatched` que le flux annonce lui-même**. Un écart lève plutôt que
+    de livrer une couche incomplète : un référentiel manquant se voit, un
+    référentiel amputé se cite comme s'il était entier.
+
+    Le résultat est écrit en GeoPackage dans un zip, pour entrer dans la même
+    mécanique d'archive que les autres référentiels.
+    """
+    import zipfile
+
+    import geopandas as gpd
+    import pandas as pd
+
+    morceaux: list = []
+    annonce: int | None = None
+    depart = 0
+    while True:
+        parts = urllib.parse.urlsplit(url)
+        params = dict(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
+        params.update({"COUNT": str(pas), "STARTINDEX": str(depart)})
+        page = urllib.parse.urlunsplit(
+            parts._replace(query=urllib.parse.urlencode(params)))
+        reponse = requests.get(page, headers=_UA, timeout=300)
+        reponse.raise_for_status()
+        charge = json.loads(reponse.content)
+        if annonce is None:
+            annonce = charge.get("numberMatched")
+        objets = charge.get("features") or []
+        if not objets:
+            break
+        morceaux.append(gpd.GeoDataFrame.from_features(
+            objets, crs=_crs_geojson(charge)))
+        depart += len(objets)
+        if len(objets) < pas:
+            break
+
+    if not morceaux:
+        raise ValueError(f"{url} : flux vide")
+    tout = gpd.GeoDataFrame(pd.concat(morceaux, ignore_index=True),
+                            crs=morceaux[0].crs)
+    if annonce is not None and len(tout) != annonce:
+        raise ValueError(
+            f"{dest.name} : {len(tout)} objets récupérés pour {annonce} "
+            f"annoncés par le flux — couche incomplète, rien n'est installé"
+        )
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    interne = dest.with_suffix(".gpkg")
+    tout.to_file(interne, driver="GPKG", layer=COUCHE_PAGINEE)
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(interne, interne.name)
+    interne.unlink()
+    return dest
+
+
+def _crs_geojson(charge: dict) -> str:
+    """Le CRS annoncé par le flux, ou WGS 84 comme le veut la norme GeoJSON."""
+    nom = (((charge.get("crs") or {}).get("properties") or {}).get("name") or "")
+    for bout in str(nom).replace("::", ":").split(":"):
+        if bout.isdigit():
+            return f"EPSG:{bout}"
+    return "EPSG:4326"
+
+
 def _manifeste_path(dossier: Path) -> Path:
     return dossier / "manifeste.json"
 
@@ -142,7 +234,8 @@ def lire_manifeste(dossier: Path) -> dict[str, Referentiel]:
     brut = json.loads(p.read_text(encoding="utf-8"))
     return {
         k: Referentiel(cle=k, version=v["version"], chemin=Path(v["chemin"]),
-                       recupere_le=v["recupere_le"], url=v["url"])
+                       recupere_le=v["recupere_le"], url=v["url"],
+                       attribution=v.get("attribution", ""))
         for k, v in brut.items()
     }
 
@@ -193,13 +286,26 @@ def assurer(cfg: dict, dossier: Path, forcer: bool = False,
         )
         if a_jour:
             refs[cle] = Referentiel(cle=cle, version=spec["version"], chemin=dest,
-                                    recupere_le=connu.recupere_le, url=spec["url"])
+                                    recupere_le=connu.recupere_le, url=spec["url"],
+                                    attribution=spec.get("attribution", ""))
             continue
 
         # Le fichier peut être là sans figurer au manifeste — première
         # utilisation d'un référentiel récupéré par ailleurs. Annoncer un
         # téléchargement qui n'aura pas lieu est le même mensonge que celui du
         # bouton « Rafraîchir » : on vérifie avant de parler.
+        if spec.get("pagine"):
+            # Flux servi par tranches : ni taille annoncée, ni reprise
+            # possible — on refait la pagination entière.
+            print(f"  téléchargement {cle} (flux paginé) …", flush=True)
+            telecharger_wfs_pagine(spec["url"], dest, int(spec["pagine"]))
+            print(f"    {dest.name} — {dest.stat().st_size / 1048576:.1f} Mo")
+            refs[cle] = Referentiel(cle=cle, version=spec["version"], chemin=dest,
+                                    recupere_le=date.today().isoformat(),
+                                    url=spec["url"],
+                                    attribution=spec.get("attribution", ""))
+            continue
+
         attendu = _taille_distante(spec["url"])
         deja_complet = dest.exists() and attendu and dest.stat().st_size >= attendu
         if not deja_complet:
@@ -212,7 +318,8 @@ def assurer(cfg: dict, dossier: Path, forcer: bool = False,
         if not deja_complet:
             print(f"    {dest.name} — {taille:.1f} Mo")
         refs[cle] = Referentiel(cle=cle, version=spec["version"], chemin=dest,
-                                recupere_le=date.today().isoformat(), url=spec["url"])
+                                recupere_le=date.today().isoformat(), url=spec["url"],
+                                attribution=spec.get("attribution", ""))
 
     _ecrire_manifeste(dossier, refs)
     return refs

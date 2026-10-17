@@ -82,9 +82,14 @@ def categorie_valide(valeur: str) -> bool:
 
     Il ne vaut que pour les colonnes dont la nomenclature est pure. Mesuré sur
     les classeurs : les 1 388 valeurs européennes le sont toutes, mais 446
-    valeurs nationales et régionales portent d'anciennes échelles — « 4 »,
-    « R », « V », « FORT », « - ǀ 3 ǀ - » — héritées de listes antérieures à
-    l'UICN. Les signaler serait crier au loup sur des valeurs voulues.
+    valeurs nationales et régionales relèvent d'autres échelles, et à bon
+    droit. **Les 199 chiffres de la colonne « Liste rouge France » sont tous
+    des orthoptères** : leur seule référence nationale, Sardet & Defaut 2004,
+    classe par indice de priorité de 1 à 4, et dans le sens inverse de
+    l'UICN — 1 pour les espèces proches de l'extinction, 4 pour les non
+    menacées. C'est aussi pourquoi BDC-Statuts n'en porte rien. S'y ajoutent
+    « R », « V », « FORT », « - ǀ 3 ǀ - », hérités de listes régionales
+    antérieures. Les signaler serait crier au loup sur des valeurs voulues.
     """
     v = _nettoyer(valeur).upper()
     if not v:

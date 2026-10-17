@@ -27,7 +27,7 @@ from pathlib import Path
 
 import geopandas as gpd
 
-from . import archives
+from . import archives, referentiels
 from .taxref import cle_alphabetique, nom_vernaculaire
 
 CRS_METRIQUE = 2154
@@ -40,6 +40,7 @@ FAMILLES = [
     ("inventaire", "Zonages d'inventaire — ZNIEFF"),
     ("natura2000", "Natura 2000 — ZPS et ZSC"),
     ("autres", "Autres zonages du patrimoine naturel"),
+    ("compensation", "Mesures compensatoires prescrites"),
 ]
 
 AIRES_DEFAUT = [
@@ -1306,6 +1307,65 @@ def _enrichir_ens(gdf, chemin: Path):
     return gdf
 
 
+def _enrichir_mesure_compensatoire(gdf, chemin: Path):
+    """Ce qu'on peut dire d'une mesure compensatoire prescrite.
+
+    Famille à part, et non « autres zonages du patrimoine naturel » : une
+    mesure compensatoire n'est pas une protection, c'est la contrepartie
+    d'une atteinte déjà autorisée. Elle répond à une autre question — qu'a-t-on
+    déjà compensé autour ? — et mérite son tableau et sa planche.
+
+    **Une limite à écrire dans le document.** Le CEREMA la signale lui-même :
+    les arrêtés antérieurs à 2016 ne portent souvent pas de géolocalisation.
+    Une carte vide ne prouve donc pas l'absence de mesures sur le terrain.
+
+    Le maître d'ouvrage est diffusé comme « données non diffusables » : on ne
+    le reprend pas, écrire cette mention dans un livrable n'apprendrait rien.
+    """
+    colonne_procedure = _premiere_colonne(gdf, ("type_procedure", "type_proce"))
+    colonne_date = _premiere_colonne(gdf, ("date_decision", "date_decis"))
+    colonne_mesure = _premiere_colonne(gdf, ("type_mesure", "type_mesur"))
+    colonne_duree = _premiere_colonne(gdf, ("duree",))
+
+    def _vide(brut) -> bool:
+        texte = str(brut or "").strip()
+        return (not texte) or texte.lower() in ("none", "nan", "a préciser",
+                                                "à préciser")
+
+    def _jour(brut) -> str:
+        """La date arrive en ISO, comme dans l'archive des espaces protégés."""
+        texte = str(brut or "").strip()[:10]
+        if len(texte) != 10 or texte[4] != "-" or texte[7] != "-":
+            return ""
+        annee, mois, jour = texte[:4], texte[5:7], texte[8:]
+        if not (annee.isdigit() and mois.isdigit() and jour.isdigit()):
+            return ""
+        return f"{jour}/{mois}/{annee}"
+
+    def _texte(ligne) -> str:
+        tete = []
+        if colonne_procedure and not _vide(ligne.get(colonne_procedure)):
+            tete.append(str(ligne[colonne_procedure]).strip())
+        if colonne_date:
+            date = _jour(ligne.get(colonne_date))
+            if date:
+                tete.append(f"décision du {date}")
+        bouts = [", ".join(tete)] if tete else []
+        for colonne in (colonne_mesure, colonne_duree):
+            if colonne and not _vide(ligne.get(colonne)):
+                bouts.append(str(ligne[colonne]).strip())
+        return " · ".join(b for b in bouts if b)
+
+    gdf = gdf.copy()
+    gdf["_interet"] = gdf.apply(_texte, axis=1)
+    # Le nom est celui du projet compensé. Quelques lignes n'en portent pas de
+    # lisible — « o » sur une emprise linéaire : l'identifiant vaut mieux que
+    # cette initiale seule.
+    gdf["_nom"] = [nom if len(str(nom or "").strip()) > 3 else ""
+                   for nom in gdf["_nom"]]
+    return gdf
+
+
 def _enrichir_zico(gdf, chemin: Path):
     """La couche ne porte qu'un identifiant et un nom, tout en capitales.
 
@@ -1401,6 +1461,25 @@ def registre() -> list[SourceZonage]:
     # annonçait déjà : sa section s'intitule « ZNIEFF de type I et II et ZICO
     # (zonages d'inventaires) », reprise du livrable de référence. La place
     # était prévue, la donnée manquait.
+    # Les mesures compensatoires, dans leur propre famille. Trois couches
+    # parce que la base sépare les géométries ; un même projet peut donc
+    # apparaître sous deux formes, ce qui est exact — une mesure se compose
+    # parfois d'une emprise et d'un linéaire de haie.
+    for cle, forme in (("mc_polygones", ""),
+                       ("mc_lineaires", " (linéaire)"),
+                       ("mc_ponctuelles", " (ponctuelle)")):
+        sources.append(SourceZonage(
+            cle=cle, archive=cle, motif_shp=f"{cle.upper()}.gpkg",
+            couche=referentiels.COUCHE_PAGINEE,
+            famille="compensation",
+            type_libelle=f"Mesure compensatoire{forme}",
+            # Deux orthographes : le GeoPackage garde les noms entiers, un
+            # shapefile les tronquerait à dix caractères. Lister les deux
+            # laisse la source changer de format sans casser la lecture.
+            colonnes_id=("identifiant", "identifian"),
+            colonnes_nom=("projet",),
+            enrichir=_enrichir_mesure_compensatoire,
+        ))
     sources.append(SourceZonage(
         cle="zico", archive="zico", motif_shp="ZICO",
         famille="inventaire",

@@ -354,10 +354,10 @@ def _controles_internes(classeurs: dict[str, Classeur],
 
     Le premier ne s'applique qu'aux types que BDC ne cite pas, et c'est
     volontaire : les colonnes nationales et régionales portent 446 valeurs
-    d'anciennes échelles — « 4 », « R », « V », « FORT », « - ǀ 3 ǀ - » —
-    héritées de listes antérieures à l'UICN. Les signaler serait crier au loup
-    sur des valeurs voulues, et ces colonnes gardent de toute façon la
-    surveillance de BDC.
+    étrangères à l'échelle UICN, et à bon droit — dont 199 indices de priorité
+    des orthoptères, dont la seule référence nationale classe de 1 à 4 dans le
+    sens inverse de l'UICN. Les signaler serait crier au loup sur des valeurs
+    voulues, et ces colonnes gardent de toute façon la surveillance de BDC.
 
     Le second compare sur la forme normalisée, comme le reste de l'outil :
     « CR* » et « CR » désignent le même statut, et les opposer aurait produit

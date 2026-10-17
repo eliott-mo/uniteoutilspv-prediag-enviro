@@ -70,3 +70,30 @@ referentiels:
     version: ""
     url: "http://ws.carmencarto.fr/WFS/119/fxx_inpn?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ms:ZICO&OUTPUTFORMAT=SHAPE"
     fichier: "ZICO.zip"
+
+  # Mesures compensatoires prescrites (CEREMA), diffusées sur la Géoplateforme.
+  # Trois couches, une par type de géométrie. La quatrième, « emprises_commune »,
+  # est volontairement écartée : elle porte le polygone de la commune entière
+  # pour les mesures dont la localisation précise est inconnue, et la retenir
+  # ferait passer « une mesure quelque part dans la commune » pour « une mesure
+  # ici » — 11 km sur 13 pour Nice.
+  mc_polygones:
+    version: ""
+    url: "https://data.geopf.fr/wfs?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=MESURES_COMPENSATOIRES%3Aemprises_polygones&OUTPUTFORMAT=application%2Fjson&SRSNAME=EPSG%3A2154"
+    pagine: 5000
+    attribution: "Cerema, diffusé par l'IGN (Géoplateforme)"
+    fichier: "MC_POLYGONES.zip"
+
+  mc_lineaires:
+    version: ""
+    url: "https://data.geopf.fr/wfs?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=MESURES_COMPENSATOIRES%3Aemprises_lineaires&OUTPUTFORMAT=application%2Fjson&SRSNAME=EPSG%3A2154"
+    pagine: 5000
+    attribution: "Cerema, diffusé par l'IGN (Géoplateforme)"
+    fichier: "MC_LINEAIRES.zip"
+
+  mc_ponctuelles:
+    version: ""
+    url: "https://data.geopf.fr/wfs?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=MESURES_COMPENSATOIRES%3Aemprises_ponctuelles&OUTPUTFORMAT=application%2Fjson&SRSNAME=EPSG%3A2154"
+    pagine: 5000
+    attribution: "Cerema, diffusé par l'IGN (Géoplateforme)"
+    fichier: "MC_PONCTUELLES.zip"
