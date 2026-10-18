@@ -346,8 +346,11 @@ def jeu(groupe: GroupePrediag, statuts: bdc.Statuts, cd_refs: list[str],
         # document de référence porte « NT ».
         ajouter(_entete_regional("Liste rouge", region), "lrr", "LRR", region,
                 bdc.PERIODE_NICHEUR, repli=True)
-        # Laissée vide : savoir si l'espèce se reproduit sur l'aire d'étude
-        # relève du terrain, pas du référentiel.
+        # Aucun référentiel ne peut dire si l'espèce se reproduit sur l'aire
+        # d'étude : cela relève de l'observation. La colonne restait donc
+        # vide — jusqu'à ce que les dépôts en portent la réponse. Faune
+        # France publie un statut de nidification par commune, et c'est lui
+        # qui s'inscrit ici quand la source l'a donné.
         colonnes.append(Colonne("Reproduction", "reproduction", centree=True,
                                 largeur_cm=1.7))
 
@@ -364,10 +367,14 @@ def jeu(groupe: GroupePrediag, statuts: bdc.Statuts, cd_refs: list[str],
 
 
 def ligne(jeu_groupe: Jeu, statuts: bdc.Statuts, cd_ref: str, nom_commun: str,
-          nom_scientifique: str) -> dict:
-    """Une ligne de tableau d'espèces, statuts résolus."""
+          nom_scientifique: str, reproduction: str = "") -> dict:
+    """Une ligne de tableau d'espèces, statuts résolus.
+
+    `reproduction` vient du dépôt et non du référentiel : c'est le statut de
+    nidification observé, que seule la source de terrain connaît.
+    """
     valeurs = {"nom_commun": nom_commun, "nom_scientifique": nom_scientifique,
-               "reproduction": ""}
+               "reproduction": reproduction}
     for cle, lecture in jeu_groupe.lectures.items():
         if not lecture.territoire:
             valeurs[cle] = ""

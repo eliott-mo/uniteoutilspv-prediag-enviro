@@ -426,6 +426,32 @@ def _nidification_lisible(texte: str) -> str:
     return texte.strip()
 
 
+#: Ce qu'une capture d'écran colle devant le nom : le nombre d'observations
+#: et les pictogrammes que l'OCR rend en « @ », « » », « e ».
+_ORNEMENT = re.compile(r"^(?:\s*\d+\s*[x×]|\s*[^\w(]+)+", re.UNICODE)
+
+
+def _nom_affichable(brut: str, nom_vern: str) -> str:
+    """Le nom à imprimer, débarrassé de ce que la lecture a ramassé.
+
+    Le tableau d'étude porte le nom tel que la source l'écrit — c'est son
+    vocabulaire, et il a sa valeur. Mais une capture d'écran écrit
+    « 1x « Pyrausta aurata » et « @ Eudonia mercurella » : le livrable
+    héritait du nombre d'observations et des pictogrammes du site.
+
+    On retire donc l'ornement. S'il reste de quoi douter — un chiffre, une
+    arobase, un guillemet au milieu du nom —, on préfère le nom vernaculaire
+    de TaxRef, qui est propre. Faute des deux, on rend ce qu'on a : une
+    cellule vide serait pire qu'un nom imparfait.
+    """
+    # La parenthèse n'est pas rognée en tête du motif — elle ouvre souvent le
+    # nom scientifique —, mais aucun nom ne commence par elle.
+    propre = _ORNEMENT.sub("", str(brut or "")).strip(" .·|-–—(«»")
+    if propre and not re.search(r"[\d@«»|~^]", propre):
+        return propre
+    return nom_vern or propre or str(brut or "").strip()
+
+
 def _cellule_par_motif(ligne: list[str], motif) -> str:
     """Première cellule de la ligne qui relève d'un motif donné."""
     for cellule in ligne:
@@ -433,6 +459,24 @@ def _cellule_par_motif(ligne: list[str], motif) -> str:
         if texte and motif.match(texte):
             return texte
     return ""
+
+
+#: Rangs taxonomiques qui valent une espèce. Au-dessus — genre, famille,
+#: ordre — il faut que la source ait déclaré son indétermination.
+_RANGS_ESPECE = frozenset({"ES", "SSES", "VAR", "SVAR", "FO", "CAR", "AB"})
+
+#: Ce par quoi une source annonce qu'elle n'a pas déterminé l'espèce.
+#: Sans ancre de fin sur les formes longues : « indéterminée » porte sa
+#: terminaison, et l'exiger entière faisait manquer le mot.
+_INDETERMINE = re.compile(r"(?i)\b(sp|spp)\b\.?|ind[ée]termin|/")
+
+
+def _espece_plausible(idx: Index, cd_ref: str, texte: str) -> bool:
+    """Le taxon apparié vaut-il une espèce, ou la source le dit-elle indéterminé ?"""
+    taxon = idx.taxon(cd_ref)
+    if taxon is None or taxon.rang in _RANGS_ESPECE:
+        return True
+    return bool(_INDETERMINE.search(texte))
 
 
 def _nom_dans_la_ligne(ligne: list[str], idx: Index, groupe: str) -> tuple[str, int]:
@@ -444,6 +488,14 @@ def _nom_dans_la_ligne(ligne: list[str], idx: Index, groupe: str) -> tuple[str, 
     ne pouvait pas suivre : il tombait sur la colonne des icônes, avec 2 %
     d'appariement, et l'essentiel des oiseaux se perdait.
 
+    **Mais fouiller toute la ligne, c'est aussi offrir le bruit à TaxRef.**
+    Les icônes d'action du site se lisent « Boa », « BOB », « 808 » ; la
+    première s'apparie au genre des boas et la deuxième à leur famille, et
+    deux serpents fantômes entraient dans le tableau des reptiles. Un
+    appariement au-dessus de l'espèce n'est donc retenu que si la source a
+    écrit son indétermination — « Pelophylax sp. », « Grenouille
+    indéterminée » —, ce qu'une icône ne fait jamais.
+
     Chercher le nom dans chaque ligne coûte quelques interrogations de TaxRef
     de plus, et ne sert que lorsque la colonne globale a échoué.
     """
@@ -451,8 +503,12 @@ def _nom_dans_la_ligne(ligne: list[str], idx: Index, groupe: str) -> tuple[str, 
         texte = (cellule or "").strip()
         if len(texte) < 4:
             continue
-        if idx.apparier(texte, groupe).resolu:
-            return texte, rang
+        appariement = idx.apparier(texte, groupe)
+        if not appariement.resolu:
+            continue
+        if not _espece_plausible(idx, appariement.cd_ref, texte):
+            continue
+        return texte, rang
     return "", -1
 
 
@@ -481,6 +537,9 @@ def extraire(depot: Depot, idx: Index, memoire: Memoire | None = None) -> tuple[
         candidate = _colonne_par_entete(lignes, _EN_TETE_NIDIF)
         if candidate is not None and candidate != col_date:
             col_nidif = candidate
+    # Le bruit n'existe que dans ce qui a été lu par OCR : un export propre
+    # peut légitimement porter un genre seul, une capture non.
+    issu_image = depot.chemin.suffix.lower() in FORMATS_IMAGE
     par_ligne = taux < _TAUX_COLONNE_SURE
     if par_ligne:
         avertissement = (avertissement or "") + (
@@ -524,6 +583,12 @@ def extraire(depot: Depot, idx: Index, memoire: Memoire | None = None) -> tuple[
 
         appariement = idx.apparier(brut, depot.groupe)
         cd_ref, statut = appariement.cd_ref, appariement.statut
+        if issu_image and cd_ref and not _espece_plausible(idx, cd_ref, brut):
+            # « Boa » lu sur une icône d'action s'appariait au genre des
+            # boas, et un serpent fantôme entrait dans le tableau des
+            # reptiles. Au-dessus de l'espèce, on exige que la source ait
+            # écrit son indétermination.
+            continue
         if cd_ref is None and memoire is not None:
             appris = memoire.alias(cle)
             if appris:
@@ -581,7 +646,9 @@ def consolider(depots: list[Depot], idx: Index,
                 en_latin = (taxon is not None
                             and normaliser(m.nom_brut) == normaliser(taxon.lb_nom))
                 espece.nom_commun = (
-                    taxon.nom_vern if (en_latin and taxon.nom_vern) else m.nom_brut
+                    taxon.nom_vern if (en_latin and taxon.nom_vern)
+                    else _nom_affichable(m.nom_brut,
+                                         taxon.nom_vern if taxon else "")
                 )
                 par_espece[m.cd_ref] = espece
 

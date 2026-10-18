@@ -30,6 +30,7 @@ ce qui manque, pour qu'on le lui signale au lieu de le taire.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from . import bdc
@@ -47,6 +48,30 @@ _PERIODES = {
 
 def _periode_bdc(colonne: ColonneStatut) -> str:
     return _PERIODES.get(colonne.periode.strip().lower(), "")
+
+
+#: L'annexe que nomme l'en-tête d'une colonne de directive.
+_ANNEXE = re.compile(r"(?i)annexe\s+(I{1,3}|IV|V)\b")
+
+
+def _valeur_directive(colonne: ColonneStatut, valeur: str) -> str:
+    """Ce qui s'imprime pour une directive : l'annexe, non le code espèce.
+
+    **Les classeurs codent l'espèce, pas l'annexe.** La colonne « Annexe I
+    directive Oiseaux » porte « A707 » pour l'Aigle de Bonelli, et « Annexe
+    II directive Habitats » porte « 1304 » pour le Grand rhinolophe. Le
+    tableau du prédiagnostic, lui, attend « Annexe II » — il filtrait donc
+    sur un libellé que le classeur n'écrit jamais, et les deux colonnes de
+    directive sortaient vides sur tout le document.
+
+    Le code espèce n'apprend rien au lecteur ; ce qu'il veut savoir est que
+    l'espèce est inscrite. L'en-tête de la colonne dit à quelle annexe, et
+    la présence d'une valeur dit que oui.
+    """
+    trouve = _ANNEXE.search(colonne.libelle or "")
+    if trouve:
+        return f"Annexe {trouve.group(1).upper()}"
+    return valeur
 
 
 def _national(type_statut: str) -> bool:
@@ -157,7 +182,9 @@ class Reference:
             # Le classeur écrit ce qui se publie : « LC », « Art. 3 »,
             # « Annexe II ». Code brut et rendu se confondent donc, là où BDC
             # distingue « NO3 » de « Art. 3 ».
-            trouvees.append(bdc.Entree(code=valeur, rendu=valeur,
+            rendu = (_valeur_directive(colonne, valeur)
+                     if type_statut in ("DO", "DH") else valeur)
+            trouvees.append(bdc.Entree(code=valeur, rendu=rendu,
                                        periode=_periode_bdc(colonne)))
         return trouvees
 

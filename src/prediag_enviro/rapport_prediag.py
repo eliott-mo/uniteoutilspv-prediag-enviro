@@ -419,6 +419,7 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
             nom_vernaculaire((taxon.nom_vern if taxon else "")
                              or espece.nom_commun),
             (taxon.lb_nom if taxon else "") or espece.nom_scientifique,
+            reproduction=getattr(espece, "nidification", ""),
         ))
     qualificatif = " à enjeu" if seulement_enjeu else ""
     rapport.tableau(
