@@ -64,6 +64,21 @@ class EtatExtraits:
         return [cle for cle, version in versions_actuelles.items()
                 if cle in self.versions and self.versions[cle] != version]
 
+    def absentes(self, cles_attendues) -> list[str]:
+        """Sources du registre que ces extraits ne contiennent pas.
+
+        **`perime()` ne pouvait pas voir ce cas.** Il compare les versions des
+        clés déjà présentes au manifeste ; une source ajoutée au registre
+        après la dernière construction n'y figure tout simplement pas, et
+        passe donc au travers. Le croisement rendait alors zéro zonage de ce
+        type — un zéro indiscernable d'une vraie absence sur le terrain.
+
+        C'est arrivé deux fois : aux mesures compensatoires, puis aux zones
+        humides. Chaque ajout de source au registre crée cette fenêtre, le
+        temps de reconstruire les extraits.
+        """
+        return sorted(cle for cle in cles_attendues if cle not in self.versions)
+
 
 def _contour(departement: str, cache: Path | None) -> "gpd.GeoSeries":
     """Contour du département, élargi de la marge."""
@@ -266,6 +281,17 @@ def croiser(emprise_union, departements: list[str], sortie: Path,
         f"Extraits {', '.join(departements)} — {len(tout)} zonages"
         + (f", construits le {courant.construit_le}" if courant else "")
     )
+    if courant is not None:
+        manquantes = courant.absentes({s.archive for s in mod_zonages.registre()})
+        if manquantes:
+            libelles = sorted({s.type_libelle for s in mod_zonages.registre()
+                               if s.archive in manquantes})
+            res.avertissements.append(
+                "Ces zonages n'ont pas été cherchés : les extraits "
+                f"départementaux datent d'avant leur ajout — {', '.join(libelles)}. "
+                "Leur absence du tableau ne vaut pas absence sur le terrain ; "
+                "reconstruire les extraits pour les prendre en compte."
+            )
 
     tout["_d"] = tout.geometry.distance(emprise_union)
     retenus = tout[tout["_d"] <= portee].sort_values("_d")

@@ -91,6 +91,16 @@ referentiels:
     attribution: "Cerema, diffusé par l'IGN (Géoplateforme)"
     fichier: "MC_LINEAIRES.zip"
 
+  # Zones humides et tourbières délimitées au titre de la norme BCAE 2 de la
+  # conditionnalité de la PAC. Ce n'est pas un inventaire écologique : voir
+  # `_enrichir_zones_humides` pour ce que cette distinction impose au document.
+  zones_humides:
+    version: ""
+    url: "https://data.geopf.fr/wfs?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=TOURBIERES_ZONES-HUMIDES.BCAE%3Abcae&OUTPUTFORMAT=application%2Fjson&SRSNAME=EPSG%3A2154"
+    pagine: 5000
+    attribution: "Ministère de l'Agriculture et de la Souveraineté alimentaire, diffusé par l'IGN (Géoplateforme)"
+    fichier: "ZONES_HUMIDES.zip"
+
   mc_ponctuelles:
     version: ""
     url: "https://data.geopf.fr/wfs?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=MESURES_COMPENSATOIRES%3Aemprises_ponctuelles&OUTPUTFORMAT=application%2Fjson&SRSNAME=EPSG%3A2154"

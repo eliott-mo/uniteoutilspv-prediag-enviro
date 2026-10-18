@@ -41,6 +41,7 @@ FAMILLES = [
     ("natura2000", "Natura 2000 — ZPS et ZSC"),
     ("autres", "Autres zonages du patrimoine naturel"),
     ("compensation", "Mesures compensatoires prescrites"),
+    ("zones_humides", "Zones humides et tourbières"),
 ]
 
 AIRES_DEFAUT = [
@@ -1257,6 +1258,45 @@ def _enrichir_ep(gdf, chemin: Path):
     return gdf
 
 
+def _enrichir_zones_humides(gdf, chemin: Path):
+    """Ce qu'on peut dire d'une zone humide BCAE — et ce qu'on doit en taire.
+
+    **Cette couche n'est pas l'inventaire des zones humides.** Elle délimite
+    celles que protège la norme BCAE 2 de la conditionnalité de la PAC : son
+    objet est agricole, et sa couverture suit le travail de délimitation
+    mené région par région, non la réalité du terrain. Mesuré sur la base de
+    2026 : 3 849 polygones en Pays de la Loire contre 3 en Île-de-France.
+
+    **Une aire d'étude sans polygone ne prouve donc rien.** Le document doit
+    le dire, comme il le dit des mesures compensatoires : l'absence sur la
+    carte n'est pas l'absence sur le terrain, et un prédiagnostic qui
+    conclurait « pas de zone humide » sur cette seule base serait fautif. La
+    pédologie et les prélocalisations régionales restent à consulter.
+
+    La couche ne porte ni nom ni identifiant : le type tient lieu de nom, et
+    la surface d'intérêt. « Tourbière · 3,4 ha » se lit, là où une ligne sans
+    libellé n'apprendrait rien.
+    """
+    colonne_type = _premiere_colonne(gdf, ("type_zone",))
+
+    def _nom(brut) -> str:
+        texte = str(brut or "").strip().lower()
+        # La source écrit « tourbiere » et « tourbière » ; un livrable ne
+        # porte pas deux orthographes du même mot.
+        if texte.startswith("tourbi"):
+            return "Tourbière"
+        # Une majuscule à la phrase, pas à chaque mot : « Zone humide
+        # effective » est un intitulé, non un nom propre.
+        return (texte[0].upper() + texte[1:]) if texte else "Zone humide"
+
+    gdf = gdf.copy()
+    gdf["_nom"] = (gdf[colonne_type].map(_nom) if colonne_type
+                   else "Zone humide")
+    gdf["_interet"] = [_surface_lisible(aire / 10000.0)
+                       for aire in gdf.geometry.area]
+    return gdf
+
+
 def _enrichir_ens(gdf, chemin: Path):
     """Ce qu'on peut dire d'un espace naturel sensible.
 
@@ -1461,6 +1501,14 @@ def registre() -> list[SourceZonage]:
     # annonçait déjà : sa section s'intitule « ZNIEFF de type I et II et ZICO
     # (zonages d'inventaires) », reprise du livrable de référence. La place
     # était prévue, la donnée manquait.
+    sources.append(SourceZonage(
+        cle="zones_humides", archive="zones_humides",
+        motif_shp="ZONES_HUMIDES.gpkg", couche=referentiels.COUCHE_PAGINEE,
+        famille="zones_humides",
+        type_libelle="Zone humide ou tourbière (BCAE 2)",
+        colonnes_id=(), colonnes_nom=(),
+        enrichir=_enrichir_zones_humides,
+    ))
     # Les mesures compensatoires, dans leur propre famille. Trois couches
     # parce que la base sépare les géométries ; un même projet peut donc
     # apparaître sous deux formes, ce qui est exact — une mesure se compose
