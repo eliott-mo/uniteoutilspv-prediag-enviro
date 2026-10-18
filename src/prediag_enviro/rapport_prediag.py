@@ -388,6 +388,58 @@ def _especes_par_groupe(resultat, contexte) -> dict[str, list]:
     return par_groupe
 
 
+def _absence_de_reference(contexte, jeu, retenues: list) -> str:
+    """Ce qu'il faut dire quand les classeurs ne couvrent pas ce groupe.
+
+    **Une cellule vide affirme quelque chose.** Un lecteur qui voit la colonne
+    « Protection nationale » vide en conclut que l'espèce n'est pas protégée —
+    et il a raison de le conclure, puisque rien ne lui dit le contraire.
+
+    Or aucun des classeurs ne couvre la flore ni les poissons. À Bédarieux,
+    cela faisait 800 plantes présentées sans aucun statut, dont six protégées
+    au titre de l'arrêté national : la Spiranthe d'été, l'Orchis de Provence,
+    la Pivoine à petits fruits. Le document affirmait le contraire de la
+    réalité sur un point réglementaire.
+
+    `Reference.connait()` existait pour ça depuis le départ — distinguer
+    « absente du classeur » de « case vide » — sans avoir jamais été branchée
+    sur le document. La voici.
+
+    On va jusqu'à dire ce que BDC-Statuts en sait, parce que c'est la mesure
+    de ce qui manque : annoncer 749 listes rouges non reprises est autrement
+    plus parlant que « groupe non couvert ».
+    """
+    reference = getattr(contexte, "reference", None)
+    if reference is None or not retenues:
+        return ""
+    inconnues = [e for e in retenues if not reference.connait(e.cd_ref)]
+    if not inconnues:
+        return ""
+
+    types = {lecture.type_statut for lecture in jeu.lectures.values()}
+    su_de_bdc = sum(
+        1 for e in inconnues
+        if any(contexte.statuts.rendu(e.cd_ref, type_statut, territoire)
+               for type_statut in types
+               for territoire in ("France métropolitaine", "Europe", jeu.region))
+    )
+    complement = (f", quand BDC-Statuts en documente {su_de_bdc}"
+                  if su_de_bdc else "")
+
+    if len(inconnues) == len(retenues):
+        return (
+            "Les classeurs de référence d'UNITe ne couvrent pas ce groupe : "
+            "les colonnes de statut ci-dessus sont vides faute de référence, "
+            "et non parce que ces espèces n'en porteraient aucun"
+            f"{complement}."
+        )
+    return (
+        f"{len(inconnues)} des {len(retenues)} espèces ci-dessus ne figurent "
+        "pas dans les classeurs de référence d'UNITe : leurs cellules sont "
+        f"vides faute de référence, et non faute de statut{complement}."
+    )
+
+
 def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
                      groupe, especes: list, seulement_enjeu: bool) -> int:
     """Un tableau d'espèces. Renvoie le nombre de lignes écrites.
@@ -428,6 +480,9 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
                 f"recensées sur la commune "
                 f"{complement_de(projet.libelle_communes)}",
     )
+    avertissement = _absence_de_reference(contexte, jeu, retenues)
+    if avertissement:
+        rapport.para(avertissement)
     return len(lignes)
 
 
