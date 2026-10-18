@@ -35,8 +35,32 @@ FORMATS_TEXTE = {".csv", ".tsv", ".txt"}
 FORMATS_PDF = {".pdf"}
 FORMATS_IMAGE = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 
-_EN_TETE_DATE = re.compile(r"(?i)\b(date|derni|observ|ann[ée]e|obs)\b")
-_EN_TETE_NIDIF = re.compile(r"(?i)\b(nidif|atlas|code|reproduction|statut biol)\b")
+#: En-têtes de colonnes. **Sans ancre de fin**, et c'est volontaire : l'OCR
+#: d'une capture rend « Nidificatior » pour « Nidification » et « Derniére »
+#: pour « Dernière ». Exiger le mot entier faisait manquer l'en-tête, et avec
+#: lui toute la colonne — aucun statut de nidification n'était capté.
+_EN_TETE_DATE = re.compile(r"(?i)\b(date|derni|observ|ann[ée]e|obs)")
+_EN_TETE_NIDIF = re.compile(r"(?i)\b(nidif|atlas|code|reproduction|statut biol)")
+
+#: Lignes examinées pour trouver un en-tête. Cinq ne suffisaient pas — une
+#: capture de page entière place le tableau sous le menu du site, et son
+#: en-tête n'arrive qu'à la douzième ligne —, mais trente était pire : le
+#: menu contient « codes atlas » et « dernières observations », et l'en-tête
+#: ainsi trouvé désignait la colonne des noms. D'où la règle qui suit : le
+#: contenu désigne la colonne, l'en-tête ne sert que s'il n'a rien trouvé.
+_LIGNES_ENTETE = 12
+
+#: Ce à quoi ressemble une date d'observation : jour.mois.année dans une
+#: capture de Faune France, année seule dans un export du SINP.
+_VALEURS_DATE = re.compile(
+    r"^\(?(\d{1,2}[./-]\d{1,2}[./-](19|20)\d{2}|(19|20)\d{2})\)?$")
+
+#: Vocabulaire des statuts de nidification, pour reconnaître la colonne par
+#: son contenu — une capture rognée sur le seul tableau n'a plus d'en-tête, ce
+#: qui est le cas courant. Les formes sont des préfixes : l'OCR coupe le
+#: dernier caractère d'une cellule étroite et rend « probabl » pour
+#: « probable ».
+_VALEURS_NIDIF = re.compile(r"(?i)^(certain|probabl|possibl|nicheur)")
 _ANNEE = re.compile(r"\b(19|20)\d{2}\b")
 
 
@@ -169,7 +193,105 @@ def _lignes_pdf(chemin: Path) -> list[list[str]]:
     return lignes
 
 
+#: Confiance minimale d'un mot reconnu. En dessous, Tesseract rend surtout du
+#: bruit de bordure — « Boa » pour une icône, « | » pour un trait de tableau.
+_CONFIANCE_MIN = 35
+
+#: Un blanc plus large que ce multiple de la hauteur du texte sépare deux
+#: colonnes. Un espace ordinaire vaut environ un tiers de cette hauteur ; le
+#: seuil laisse donc passer les espaces d'un nom composé sans couper, et
+#: tranche là où le tableau laisse un vide.
+_ECART_COLONNE = 1.4
+
+
+def _langues_ocr(pytesseract) -> tuple[str, str]:
+    """Langues à demander, et l'avertissement si le français manque.
+
+    **Une langue absente ne fait pas échouer Tesseract**, qui rend le texte
+    reconnu avec les langues restantes sans rien signaler. On lisait donc du
+    français avec le seul modèle anglais, et la sortie était rigoureusement
+    identique à `lang="eng"` — « Geomantis /arvoides » pour *larvoides*. Le
+    silence est le vrai défaut : on vérifie et on le dit.
+    """
+    try:
+        presentes = set(pytesseract.get_languages())
+    except Exception:  # noqa: BLE001
+        return "fra+eng", ""
+    if "fra" in presentes:
+        return "fra+eng", ""
+    return "eng", ("modèle français absent de Tesseract — les noms vernaculaires "
+                   "seront mal lus. Déposer fra.traineddata dans le dossier "
+                   "tessdata de Tesseract-OCR.")
+
+
+def _mots_reconnus(pytesseract, image, langues: str) -> list[dict]:
+    """Les mots lus, avec leur position. C'est la position qui fait la colonne."""
+    donnees = pytesseract.image_to_data(
+        image, lang=langues, config="--psm 6",
+        output_type=pytesseract.Output.DICT)
+    mots = []
+    for i, texte in enumerate(donnees["text"]):
+        texte = (texte or "").strip()
+        try:
+            confiance = float(donnees["conf"][i])
+        except (TypeError, ValueError):
+            continue
+        if texte and confiance >= _CONFIANCE_MIN:
+            mots.append({"t": texte, "x": donnees["left"][i],
+                         "y": donnees["top"][i], "w": donnees["width"][i],
+                         "h": donnees["height"][i]})
+    return mots
+
+
+def _grouper_en_lignes(mots: list[dict]) -> list[list[dict]]:
+    """Rassemble les mots dont les centres sont à la même hauteur."""
+    lignes: list[list[dict]] = []
+    for mot in sorted(mots, key=lambda m: (m["y"], m["x"])):
+        centre = mot["y"] + mot["h"] / 2
+        place = False
+        for ligne in reversed(lignes[-3:]):          # seules les dernières
+            ref = ligne[0]
+            if abs(centre - (ref["y"] + ref["h"] / 2)) <= ref["h"] * 0.6:
+                ligne.append(mot)
+                place = True
+                break
+        if not place:
+            lignes.append([mot])
+    return lignes
+
+
+def _decouper_en_colonnes(ligne: list[dict]) -> list[str]:
+    """Coupe une ligne là où le blanc dépasse la largeur d'un espace."""
+    mots = sorted(ligne, key=lambda m: m["x"])
+    hauteur = sorted(m["h"] for m in mots)[len(mots) // 2]
+    cellules, courante = [], [mots[0]["t"]]
+    precedent = mots[0]
+    for mot in mots[1:]:
+        if mot["x"] - (precedent["x"] + precedent["w"]) > hauteur * _ECART_COLONNE:
+            cellules.append(" ".join(courante))
+            courante = []
+        courante.append(mot["t"])
+        precedent = mot
+    cellules.append(" ".join(courante))
+    return [c.strip() for c in cellules if c.strip()]
+
+
 def _lignes_image(chemin: Path) -> tuple[list[list[str]], str]:
+    """Lit une capture d'écran de tableau, colonne par colonne.
+
+    **On lisait la capture en lignes de texte, ce qui écrasait les
+    colonnes** : chaque ligne du tableau revenait en une cellule unique, si
+    bien que le nom, la date et le statut de nidification se mêlaient ou se
+    perdaient. Le repérage de la colonne des noms n'avait alors rien à
+    départager, et aucune date n'était captée.
+
+    Tesseract sait pourtant rendre la position de chaque mot. On la lui
+    demande, on rassemble les mots par hauteur pour reconstituer les lignes,
+    puis on coupe là où le blanc s'élargit. Les colonnes d'un tableau rendu en
+    HTML — ce que sont ces captures — se retrouvent ainsi sans avoir à figer
+    leurs abscisses, qui changent d'un site et d'une largeur de fenêtre à
+    l'autre.
+    """
     binaire = _tesseract_disponible()
     if binaire is None:
         return [], ("Tesseract introuvable — capture non lue. Installer Tesseract-OCR, "
@@ -180,9 +302,13 @@ def _lignes_image(chemin: Path) -> tuple[list[list[str]], str]:
     except ImportError:
         return [], "pytesseract ou Pillow absent — capture non lue"
     pytesseract.pytesseract.tesseract_cmd = binaire
-    texte = pytesseract.image_to_string(Image.open(chemin), lang="fra+eng")
-    lignes = [[bout.strip()] for bout in texte.splitlines() if bout.strip()]
-    return lignes, ""
+
+    langues, avertissement = _langues_ocr(pytesseract)
+    mots = _mots_reconnus(pytesseract, Image.open(chemin), langues)
+    if not mots:
+        return [], (avertissement or "aucun texte reconnu dans la capture")
+    lignes = [_decouper_en_colonnes(l) for l in _grouper_en_lignes(mots)]
+    return [l for l in lignes if l], avertissement
 
 
 def lire_depot(depot: Depot) -> tuple[list[list[str]], str]:
@@ -241,11 +367,29 @@ def _colonne_des_noms(lignes: list[list[str]], idx: Index,
 
 
 def _colonne_par_entete(lignes: list[list[str]], motif: re.Pattern) -> int | None:
-    for ligne in lignes[:5]:
+    for ligne in lignes[:_LIGNES_ENTETE]:
         for i, cellule in enumerate(ligne):
             if cellule and motif.search(cellule):
                 return i
     return None
+
+
+def _colonne_par_valeurs(lignes: list[list[str]], motif: re.Pattern,
+                         minimum: int = 2) -> int | None:
+    """Colonne dont les valeurs relèvent d'un vocabulaire connu.
+
+    Repli quand l'en-tête manque. On exige plusieurs occurrences : un mot
+    isolé peut venir du bruit de l'OCR, une colonne entière non.
+    """
+    comptes: dict[int, int] = {}
+    for ligne in lignes:
+        for i, cellule in enumerate(ligne):
+            if cellule and motif.match(cellule.strip()):
+                comptes[i] = comptes.get(i, 0) + 1
+    if not comptes:
+        return None
+    meilleure = max(comptes, key=lambda i: comptes[i])
+    return meilleure if comptes[meilleure] >= minimum else None
 
 
 def _valeur_date(lignes: list[list[str]], ligne: list[str], col: int | None) -> str:
@@ -261,6 +405,57 @@ def _valeur_date(lignes: list[list[str]], ligne: list[str], col: int | None) -> 
     return ""
 
 
+#: En deçà de ce taux d'appariement, la colonne des noms est tenue pour
+#: introuvable et chaque ligne est fouillée séparément.
+_TAUX_COLONNE_SURE = 0.15
+
+
+#: Formes entières des statuts de nidification, à rétablir après l'OCR qui
+#: ampute la dernière lettre d'une cellule étroite : « probabl », « certain ».
+#: Un livrable n'a pas à porter la trace de l'outil qui l'a lu.
+_NIDIF_ENTIER = {"certain": "certaine", "probabl": "probable",
+                 "possibl": "possible", "nicheur": "nicheur"}
+
+
+def _nidification_lisible(texte: str) -> str:
+    """Le statut, écrit en entier."""
+    bas = texte.strip().lower()
+    for prefixe, entier in _NIDIF_ENTIER.items():
+        if bas.startswith(prefixe):
+            return entier
+    return texte.strip()
+
+
+def _cellule_par_motif(ligne: list[str], motif) -> str:
+    """Première cellule de la ligne qui relève d'un motif donné."""
+    for cellule in ligne:
+        texte = (cellule or "").strip()
+        if texte and motif.match(texte):
+            return texte
+    return ""
+
+
+def _nom_dans_la_ligne(ligne: list[str], idx: Index, groupe: str) -> tuple[str, int]:
+    """Cellule de la ligne qui s'apparie à TaxRef, et son rang.
+
+    **Les captures de page entière décalent les colonnes.** Celle des oiseaux
+    porte le menu du site à gauche du tableau, si bien qu'une ligne sur deux
+    compte une cellule de plus et que le nom glisse d'un cran. Un index fixe
+    ne pouvait pas suivre : il tombait sur la colonne des icônes, avec 2 %
+    d'appariement, et l'essentiel des oiseaux se perdait.
+
+    Chercher le nom dans chaque ligne coûte quelques interrogations de TaxRef
+    de plus, et ne sert que lorsque la colonne globale a échoué.
+    """
+    for rang, cellule in enumerate(ligne):
+        texte = (cellule or "").strip()
+        if len(texte) < 4:
+            continue
+        if idx.apparier(texte, groupe).resolu:
+            return texte, rang
+    return "", -1
+
+
 # ------------------------------------------------------------- consolidation
 
 def extraire(depot: Depot, idx: Index, memoire: Memoire | None = None) -> tuple[list[Mention], str]:
@@ -270,12 +465,27 @@ def extraire(depot: Depot, idx: Index, memoire: Memoire | None = None) -> tuple[
         return [], avertissement or "aucune ligne exploitable"
 
     col_nom, taux = _colonne_des_noms(lignes, idx, depot.groupe)
-    col_date = _colonne_par_entete(lignes, _EN_TETE_DATE)
-    col_nidif = _colonne_par_entete(lignes, _EN_TETE_NIDIF)
-    if taux < 0.15:
+    # Le contenu désigne la colonne des dates : une suite de « 09.04.2026 »
+    # ne se confond avec rien, là où un en-tête lu par l'OCR, ou un mot du
+    # menu du site, désignait la colonne des noms et publiait « 10x Pisaur »
+    # comme date d'observation.
+    col_date = (_colonne_par_valeurs(lignes, _VALEURS_DATE, minimum=3)
+                or _colonne_par_entete(lignes, _EN_TETE_DATE))
+    # Le contenu d'abord, l'en-tête ensuite : un en-tête ne se croit pas sans
+    # vérification. Élargir sa recherche au-delà des premières lignes lui
+    # faisait accrocher un « codes atlas » du menu du site sur des captures
+    # sans colonne de nidification, et la colonne des dates se retrouvait
+    # publiée comme un statut de reproduction.
+    col_nidif = _colonne_par_valeurs(lignes, _VALEURS_NIDIF)
+    if col_nidif is None:
+        candidate = _colonne_par_entete(lignes, _EN_TETE_NIDIF)
+        if candidate is not None and candidate != col_date:
+            col_nidif = candidate
+    par_ligne = taux < _TAUX_COLONNE_SURE
+    if par_ligne:
         avertissement = (avertissement or "") + (
-            f" colonne des noms peu sûre (taux d'appariement {taux:.0%}) —"
-            " vérifier le fichier"
+            f" colonnes décalées (appariement de la meilleure : {taux:.0%}) —"
+            " lecture ligne à ligne"
         ).strip()
 
     # En-tête et préambule : plutôt que de les reconnaître à leurs mots, on
@@ -283,7 +493,11 @@ def extraire(depot: Depot, idx: Index, memoire: Memoire | None = None) -> tuple[
     # du titre, de la légende ou des colonnes — pas des espèces.
     debut = 0
     for i, ligne in enumerate(lignes):
-        if col_nom < len(ligne) and ligne[col_nom].strip():
+        if par_ligne:
+            if _nom_dans_la_ligne(ligne, idx, depot.groupe)[0]:
+                debut = i
+                break
+        elif col_nom < len(ligne) and ligne[col_nom].strip():
             if idx.apparier(ligne[col_nom], depot.groupe).resolu:
                 debut = i
                 break
@@ -291,9 +505,12 @@ def extraire(depot: Depot, idx: Index, memoire: Memoire | None = None) -> tuple[
     mentions: list[Mention] = []
     vus: set[str] = set()
     for ligne in lignes[debut:]:
-        if col_nom >= len(ligne):
+        if par_ligne:
+            brut = _nom_dans_la_ligne(ligne, idx, depot.groupe)[0]
+        elif col_nom < len(ligne):
+            brut = (ligne[col_nom] or "").strip()
+        else:
             continue
-        brut = (ligne[col_nom] or "").strip()
         if not brut or len(brut) < 3:
             continue
         cle = normaliser(brut)
@@ -314,9 +531,13 @@ def extraire(depot: Depot, idx: Index, memoire: Memoire | None = None) -> tuple[
 
         mentions.append(Mention(
             nom_brut=brut, depot=depot, cd_ref=cd_ref, statut=statut,
-            date_obs=_valeur_date(lignes, ligne, col_date),
-            nidification=(ligne[col_nidif].strip()
-                          if col_nidif is not None and col_nidif < len(ligne) else ""),
+            date_obs=(_cellule_par_motif(ligne, _VALEURS_DATE) if par_ligne
+                      else _valeur_date(lignes, ligne, col_date)),
+            nidification=_nidification_lisible(
+                _cellule_par_motif(ligne, _VALEURS_NIDIF) if par_ligne
+                else (ligne[col_nidif].strip()
+                      if col_nidif is not None
+                      and col_nidif < len(ligne) else "")),
         ))
     return mentions, avertissement
 
