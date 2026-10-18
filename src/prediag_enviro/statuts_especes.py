@@ -294,6 +294,21 @@ class Jeu:
     lectures: dict[str, Lecture] = field(default_factory=dict)
 
 
+#: Pourquoi une colonne de plus. **Une ZNIEFF n'est pas une protection mais
+#: un inventaire**, et une espèce « déterminante » est celle dont la présence
+#: justifie d'en créer ou d'en délimiter une. Le statut n'emporte donc aucune
+#: obligation : c'est un signal d'enjeu local, régional et souvent assorti
+#: d'une condition — « Oui (MC, MED, SO) » pour les domaines biogéographiques.
+#:
+#: L'outil maniait déjà la notion par l'autre bout, en listant les espèces
+#: déterminantes des ZNIEFF croisées. Il manquait l'inverse : dire d'une
+#: espèce relevée sur le site qu'elle est déterminante ici.
+#:
+#: C'est aussi la seule matière dont disposent certains groupes. Le classeur
+#: des macrohétérocères ne porte aucune liste rouge — « à venir », écrit sa
+#: feuille de références — mais 436 espèces déterminantes en Occitanie. Sans
+#: cette colonne, leur tableau sortait avec cinq colonnes vides : à Bédarieux,
+#: 24 des 29 espèces déterminantes relevées sont des hétérocères.
 def _entete_regional(prefixe: str, region: str) -> str:
     if not region:
         return f"{prefixe} régionale"
@@ -305,6 +320,12 @@ def jeu(groupe: GroupePrediag, statuts: bdc.Statuts, cd_refs: list[str],
     """Colonnes et lectures du tableau d'un groupe."""
     region = territoire_regional(statuts, cd_refs, departements)
     region_pr = territoire_regional(statuts, cd_refs, departements, "PR")
+    # Le territoire se choisit par type de statut, et non une fois pour tout
+    # le tableau : le classeur des mammifères porte une liste rouge
+    # Languedoc-Roussillon mais ne déclare ses espèces déterminantes qu'en
+    # Occitanie. Un territoire unique laissait la colonne vide sur les cinq
+    # chiroptères déterminants de Bédarieux.
+    region_zdet = territoire_regional(statuts, cd_refs, departements, "ZDET")
 
     colonnes: list[Colonne] = [
         Colonne("Nom commun", "nom_commun", largeur_cm=3.6),
@@ -327,6 +348,8 @@ def jeu(groupe: GroupePrediag, statuts: bdc.Statuts, cd_refs: list[str],
         ajouter(_entete_regional("Liste rouge", region), "lrr", "LRR", region)
         ajouter("Directive Habitats", "dh", "DH", "France métropolitaine",
                 filtre=("Annexe II", "Annexe IV"))
+        ajouter(_entete_regional("Déterminante ZNIEFF", region_zdet), "zdet",
+                "ZDET", region_zdet, largeur=2.3)
 
     elif groupe.forme == "avifaune":
         ajouter("Annexe I de la Directive Oiseaux", "do", "DO",
@@ -346,6 +369,8 @@ def jeu(groupe: GroupePrediag, statuts: bdc.Statuts, cd_refs: list[str],
         # document de référence porte « NT ».
         ajouter(_entete_regional("Liste rouge", region), "lrr", "LRR", region,
                 bdc.PERIODE_NICHEUR, repli=True)
+        ajouter(_entete_regional("Déterminante ZNIEFF", region_zdet), "zdet",
+                "ZDET", region_zdet, largeur=2.3)
         # Aucun référentiel ne peut dire si l'espèce se reproduit sur l'aire
         # d'étude : cela relève de l'observation. La colonne restait donc
         # vide — jusqu'à ce que les dépôts en portent la réponse. Faune
@@ -361,6 +386,8 @@ def jeu(groupe: GroupePrediag, statuts: bdc.Statuts, cd_refs: list[str],
         ajouter("Protection nationale", "pn", "PN", "France métropolitaine")
         ajouter("Liste rouge France", "lrn", "LRN", "France métropolitaine")
         ajouter(_entete_regional("Liste rouge", region), "lrr", "LRR", region)
+        ajouter(_entete_regional("Déterminante ZNIEFF", region_zdet), "zdet",
+                "ZDET", region_zdet, largeur=2.3)
 
     return Jeu(groupe=groupe, colonnes=colonnes, region=region,
                lectures=lectures)
