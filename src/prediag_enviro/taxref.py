@@ -285,6 +285,14 @@ class Index:
             return Appariement("non resolu", None, "vide après nettoyage")
 
         fragments = self._fragments(nettoye) + self._fragments(str(brut))
+        # En dernier recours seulement : le nom complet prime, pour qu'une
+        # sous-espèce ne soit pas rabattue sur l'espèce quand les deux sont
+        # connues de TaxRef.
+        depouille = self._sans_auteur(brut)
+        if depouille:
+            forme = normaliser(depouille)
+            if forme and forme not in fragments:
+                fragments.append(forme)
         for forme in fragments:
             for table, statut in ((self.vern, "exact"), (self.sci, "exact-sci")):
                 if forme in table:
@@ -307,6 +315,40 @@ class Index:
             if cd:
                 return Appariement("approche", cd, proche)
         return Appariement("non resolu", None)
+
+    @staticmethod
+    def _sans_auteur(s: str) -> str:
+        """Le binôme ou trinôme seul, quand un auteur le suit. Sinon « ».
+
+        **Les exports de portails donnent le nom d'auteur** — « Fringilla
+        coelebs Linnaeus, 1758 » — et TaxRef indexe le nom sans lui. Sur les
+        1 747 espèces d'un export du SINP Occitanie, 40 % seulement
+        s'appariaient ; en retirant l'auteur, 97 %.
+
+        On ne tronque pas à l'aveugle : un nom vernaculaire comme « Grand
+        Corbeau » serait réduit à « Grand », qui s'apparierait n'importe où.
+        La coupe n'a donc lieu que si ce qui suit l'épithète **ressemble à un
+        auteur** : un mot capitalisé, une initiale, un « & », ou une année.
+        L'épithète lui-même doit être en minuscules, ce qui écarte les noms
+        français composés.
+        """
+        mots = [m for m in str(s or "").replace(",", " ").split() if m]
+        if len(mots) < 3:
+            return ""
+        if not re.match(r"^[A-Z][a-zü-]+$", mots[0]):
+            return ""
+        garde = [mots[0]]
+        for mot in mots[1:]:
+            if len(garde) < 3 and re.match(r"^[a-zü-]+\.?$", mot):
+                garde.append(mot)
+            else:
+                break
+        if len(garde) < 2 or len(garde) == len(mots):
+            return ""
+        suite = mots[len(garde)]
+        auteur = (re.match(r"^[A-Z]", suite) or suite.startswith("&")
+                  or re.match(r"^\(?(1[789]|20)\d{2}\)?$", suite))
+        return " ".join(garde) if auteur else ""
 
     @staticmethod
     def _fragments(s: str) -> list[str]:
