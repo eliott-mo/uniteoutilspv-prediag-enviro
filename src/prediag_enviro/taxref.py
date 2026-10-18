@@ -55,6 +55,9 @@ _BRUIT = re.compile(
 )
 _ANNEE = re.compile(r"\b(1[89]|20)\d{2}\b")
 _PARENTHESES = re.compile(r"\([^)]*\)")
+#: Nombre d'observations collé devant le nom, dans les tableaux de Faune
+#: France : « 75x Alouette lulu ». Sans le retirer, rien ne s'apparie.
+_COMPTE = re.compile(r"^\s*\d+\s*[x×]\s*", re.IGNORECASE)
 _SEPARATEURS = (" - ", " – ", " — ", "/", ",", ";", "|")
 
 
@@ -279,12 +282,20 @@ class Index:
 
     def apparier(self, brut: str, groupe: str | None = None) -> Appariement:
         """Apparie un nom (vernaculaire ou scientifique) vers un cd_ref."""
-        nettoye = _PARENTHESES.sub(" ", str(brut or ""))
+        depart = _COMPTE.sub("", str(brut or ""))
+        nettoye = _PARENTHESES.sub(" ", depart)
         nettoye = _BRUIT.sub(" ", _ANNEE.sub(" ", nettoye)).strip(" ,;:.")
         if not normaliser(nettoye):
             return Appariement("non resolu", None, "vide après nettoyage")
 
-        fragments = self._fragments(nettoye) + self._fragments(str(brut))
+        fragments = self._fragments(nettoye) + self._fragments(depart)
+        # Le nom scientifique est souvent entre parenthèses, derrière le nom
+        # français — « Alouette lulu (Lullula arborea) ». On le retirait en
+        # nettoyant, alors qu'il est la forme la plus sûre : on l'essaie.
+        for interieur in re.findall(r"\(([^)]*)\)", depart):
+            forme = normaliser(_ANNEE.sub(" ", interieur))
+            if forme and forme not in fragments:
+                fragments.append(forme)
         # En dernier recours seulement : le nom complet prime, pour qu'une
         # sous-espèce ne soit pas rabattue sur l'espèce quand les deux sont
         # connues de TaxRef.

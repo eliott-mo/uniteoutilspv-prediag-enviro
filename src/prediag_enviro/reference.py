@@ -104,6 +104,19 @@ class Reference:
     def __len__(self) -> int:
         return len(self._par_cd)
 
+    def groupe_classeur(self, cd_ref: str) -> str:
+        """Nom du classeur qui porte ce taxon — « macroheteroceres »…
+
+        C'est la classification de la responsable environnement, et elle
+        tranche là où TaxRef ne distingue pas : un rhopalocère et un
+        hétérocère sont tous deux « Lépidoptères » dans `GROUP3_INPN`, et
+        l'ordre taxonomique ne dit que « Lepidoptera ». Ses deux classeurs,
+        eux, les séparent — c'est la règle posée en octobre 2026, le classeur
+        fait foi.
+        """
+        fiche = self._par_cd.get(str(cd_ref).strip())
+        return fiche.classeur.groupe if fiche is not None else ""
+
     def connait(self, cd_ref: str) -> bool:
         """Le taxon figure-t-il dans un classeur ?
 

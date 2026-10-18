@@ -383,7 +383,8 @@ def _especes_par_groupe(resultat, contexte) -> dict[str, list]:
         return par_groupe
     for espece in resultat.especes:
         taxon = contexte.index.taxons.get(espece.cd_ref)
-        par_groupe.setdefault(se.groupe_de(taxon).cle, []).append(espece)
+        par_groupe.setdefault(
+            se.groupe_de(taxon, contexte.reference).cle, []).append(espece)
     return par_groupe
 
 
@@ -573,7 +574,8 @@ def _compter_par_famille_etude(resultat, contexte) -> dict[str, tuple[int, int]]
     par_groupe: dict[str, list] = {}
     for espece in resultat.especes:
         taxon = contexte.index.taxons.get(espece.cd_ref)
-        par_groupe.setdefault(se.groupe_de(taxon).cle, []).append(espece)
+        par_groupe.setdefault(
+            se.groupe_de(taxon, contexte.reference).cle, []).append(espece)
 
     comptes: dict[str, list[int]] = {}
     for cle_groupe, especes in par_groupe.items():

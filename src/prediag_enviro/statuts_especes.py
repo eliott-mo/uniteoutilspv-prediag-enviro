@@ -130,8 +130,12 @@ GROUPES: tuple[GroupePrediag, ...] = (
     GroupePrediag("mammiferes", "Mammifères", "faune", ("Mammifères",),
                   "de mammifères"),
     GroupePrediag("odonates", "Odonates", "faune", ("Odonates",), "d'odonates"),
-    GroupePrediag("lepidopteres", "Papillons", "faune", ("Lépidoptères",),
-                  "de papillons"),
+    GroupePrediag("lepidopteres", "Rhopalocères", "faune", ("Lépidoptères",),
+                  "de papillons de jour"),
+    # Sans étiquette : aucun libellé de TaxRef ne mène ici. Seul le classeur
+    # des macrohétérocères y envoie, par `groupe_de(taxon, reference)`.
+    GroupePrediag("heteroceres", "Hétérocères", "faune", (),
+                  "de papillons de nuit"),
     GroupePrediag("orthopteres", "Orthoptères", "faune", ("Orthoptères",),
                   "d'orthoptères"),
     GroupePrediag("coleopteres", "Coléoptères", "faune", ("Coléoptères",),
@@ -152,8 +156,8 @@ FAMILLES_ETUDE: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("chiropteres", "Chiroptères", ("chiropteres",)),
     ("autre_faune", "Autre faune",
      ("mammiferes", "amphibiens", "reptiles", "odonates", "lepidopteres",
-      "orthopteres", "coleopteres", "araignees", "poissons", "insectes",
-      "flore", "autres")),
+      "heteroceres", "orthopteres", "coleopteres", "araignees", "poissons",
+      "insectes", "flore", "autres")),
 )
 
 
@@ -170,16 +174,31 @@ _PAR_ETIQUETTE = {etiquette: groupe
 _PAR_CLE = {groupe.cle: groupe for groupe in GROUPES}
 
 
-def groupe_de(taxon: Taxon | None) -> GroupePrediag:
+#: Classeur dont les taxons relèvent des papillons de nuit. TaxRef ne permet
+#: pas la coupe — rhopalocères et hétérocères sont également « Lépidoptères »
+#: dans `GROUP3_INPN` et « Lepidoptera » dans l'ordre —, mais la
+#: responsable environnement tient les deux listes séparées.
+_CLASSEUR_HETEROCERES = "macroheteroceres"
+
+
+def groupe_de(taxon: Taxon | None, reference=None) -> GroupePrediag:
     """Groupe du prédiagnostic auquel ce taxon appartient.
 
     `GROUP3_INPN` d'abord, puisqu'il distingue odonates, papillons et
     orthoptères ; `GROUP2_INPN` ensuite, qu'il porte « Oiseaux » ou
     « Angiospermes ». Faute des deux, « Autres groupes » : un taxon sans
     rubrique sortirait du document sans que personne s'en aperçoive.
+
+    `reference`, quand elle est fournie, sépare les papillons de nuit des
+    papillons de jour. Aucun champ de TaxRef ne le permet ; ses classeurs,
+    si. Sans elle, les deux restent ensemble sous « Rhopalocères » plutôt que
+    de risquer un classement faux.
     """
     if taxon is None:
         return _PAR_CLE["autres"]
+    if reference is not None and taxon.cd_ref:
+        if reference.groupe_classeur(taxon.cd_ref) == _CLASSEUR_HETEROCERES:
+            return _PAR_CLE["heteroceres"]
     # L'ordre taxonomique d'abord : c'est le seul endroit où les chiroptères
     # se distinguent, « Mammifères » dans GROUP2_INPN et « Autres » dans
     # GROUP3_INPN les noyant parmi les autres mammifères.
