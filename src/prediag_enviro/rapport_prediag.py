@@ -209,12 +209,24 @@ def _citer(zonages_cites: list) -> str:
     return " · ".join(f"{z.type} — « {z.nom} »" for z in zonages_cites)
 
 
+#: Au-delà de ce nombre, un type s'énumère par ses plus proches et se compte
+#: pour le reste. Les zones humides BCAE en comptent 782 dans un rayon de
+#: 5 km en Vendée, sans nom ni identifiant : les tabuler toutes n'aurait rien
+#: appris, et aurait noyé les ZNIEFF qui suivent.
+MAX_PAR_TYPE = 15
+
+
 def _groupes_tableau(retenus: list) -> list[tuple[str, list[dict]]]:
     """Lignes du tableau, groupées par type sous une ligne fusionnée.
 
     C'est la forme du document de référence : « Zone Naturelle d'Intérêt
     Écologique Faunistique et Floristique de type I » occupe une ligne à lui
     seul, et ses entrées suivent dessous.
+
+    Un type trop fourni est écourté. Ce sont les zonages les plus proches qui
+    pèsent sur un projet, et le croisement les a déjà triés par distance : on
+    garde ceux-là et on dit combien d'autres suivent, plutôt que de publier
+    huit cents lignes que personne ne lira.
     """
     par_type: dict[str, list[dict]] = {}
     for zonage in retenus:
@@ -225,6 +237,17 @@ def _groupes_tableau(retenus: list) -> list[tuple[str, list[dict]]]:
             "interet": zonage.interet,
             "aires": ", ".join(zonage.aires),
         })
+    for type_zonage, lignes in par_type.items():
+        if len(lignes) <= MAX_PAR_TYPE:
+            continue
+        reste = len(lignes) - MAX_PAR_TYPE
+        par_type[type_zonage] = lignes[:MAX_PAR_TYPE] + [{
+            "nom": f"… et {reste} autre{'s' if reste > 1 else ''} "
+                   f"entité{'s' if reste > 1 else ''} de ce type dans les "
+                   f"aires d'étude, plus éloignée"
+                   f"{'s' if reste > 1 else ''}",
+            "distance": "", "identifiant": "", "interet": "", "aires": "",
+        }]
     # L'ordre des types suit celui du croisement, qui trie par famille puis par
     # type puis par distance : les plus proches d'abord dans chaque groupe.
     ordre = []

@@ -261,8 +261,26 @@ def charger(departements: list[str], sortie: Path,
         morceaux.append(morceau)
     tout = gpd.GeoDataFrame(pd.concat(morceaux, ignore_index=True),
                             crs=CRS_METRIQUE)
-    # Un zonage à cheval sur deux départements figure dans les deux extraits.
-    return tout.drop_duplicates(subset=["_cle", "_id"]).reset_index(drop=True)
+    # Un zonage à cheval sur deux départements figure dans les deux extraits,
+    # et le couple (source, identifiant) le reconnaît.
+    #
+    # **Mais toutes les couches ne portent pas d'identifiant.** Les zones
+    # humides BCAE n'en ont aucun, et leur nom est leur type : les 23 130
+    # polygones de la Vendée partageaient donc la même clé et se réduisaient
+    # à un seul. Le croisement rendait zéro zone humide là où il y en a des
+    # milliers — un zéro d'autant plus trompeur qu'il ressemblait à une vraie
+    # absence.
+    #
+    # Une ligne sans identifiant ne peut pas être dédoublonnée : rien ne dit
+    # qu'elle est le même objet qu'une autre. On la garde donc, quitte à
+    # compter deux fois un polygone coupé par une limite départementale —
+    # mieux vaut un doublon visible qu'un millier d'objets effacés.
+    sans_id = tout["_id"].astype(str).str.strip() == ""
+    dedoublonnes = tout[~sans_id].drop_duplicates(subset=["_cle", "_id"])
+    return gpd.GeoDataFrame(
+        pd.concat([dedoublonnes, tout[sans_id]], ignore_index=True),
+        crs=CRS_METRIQUE,
+    ).reset_index(drop=True)
 
 
 def croiser(emprise_union, departements: list[str], sortie: Path,
