@@ -29,7 +29,21 @@ MOTIFS = {
     "insectes": "*insectes*.xlsx",
     "macroheteroceres": "*macroh*.xlsx",
     "araignees": "*araign*.xlsx",
+    # Le classeur de flore n'a pas la disposition des six autres et porte un
+    # nom d'une autre série (« A - Statut FLORE »). Le motif couvre le cas
+    # courant ; `lire_tous` reconnaît en plus sa signature, de sorte qu'un
+    # renommage ou une casse différente ne le fasse pas disparaître.
+    "flore": "*[Ff][Ll][Oo][Rr][Ee]*.xlsx",
 }
+
+#: Classeurs que la veille ne confronte pas à BDC-Statuts.
+#:
+#: **Le classeur de flore.** L'onglet A sert à dire à la responsable
+#: environnement ce qui a bougé dans *sa* curation ; celui-là ne vient pas
+#: d'elle, il est lui-même dérivé de TaxRef v18, et ses 23 830 taxons sur
+#: soixante colonnes produiraient des milliers de constats que personne n'a
+#: mandat d'arbitrer. Il relève du prédiag, pas de la veille.
+GROUPES_HORS_VEILLE = ("flore",)
 
 
 @dataclass
@@ -47,14 +61,23 @@ class Contexte:
 
     @property
     def source_statuts(self):
-        """Où lire un statut : le classeur s'il est là, BDC sinon.
+        """Où lire un statut : le classeur s'il porte l'espèce, BDC sinon.
 
-        La règle arrêtée en octobre 2026 est que le classeur fait foi. Le
-        repli sur BDC ne la contredit pas : il évite qu'une installation sans
-        classeur ne produise des tableaux vides sans rien dire. Le document
-        nomme sa source, de sorte qu'on sait toujours laquelle a servi.
+        La règle arrêtée en octobre 2026 est que le classeur fait foi. Deux
+        replis sur BDC ne la contredisent pas, et ils ne jouent ni au même
+        moment ni au même grain :
+
+        * **aucun classeur installé** — une installation neuve produirait des
+          tableaux entièrement vides sans rien dire ;
+        * **un taxon qu'aucun classeur ne porte** — la flore, et c'est la
+          décision du 28 octobre 2026 (voir `reference.AvecRepli`).
+
+        Dans les deux cas le document nomme la source employée, de sorte
+        qu'on sait toujours laquelle a servi.
         """
-        return self.reference or self.statuts
+        if self.reference is None:
+            return self.statuts
+        return reference_mod.AvecRepli(self.reference, self.statuts)
 
     @property
     def resume_versions(self) -> str:
@@ -97,18 +120,36 @@ def charger_contexte(racine: Path, forcer: bool = False,
                                   spec_bdc["membres"]["principal"],
                                   spec_bdc["version"], dossier / "bdc_index.pkl")
 
-    # Les classeurs sont légers — 5 Mo — et le prédiagnostic ne peut pas
-    # s'en passer : on les lit ici plutôt que de les demander plus tard.
+    # Le prédiagnostic ne peut pas se passer des classeurs : on les lit ici
+    # plutôt que de les demander plus tard. Les six B-Statuts sont légers —
+    # 5 Mo ; celui de la flore pèse 38 Mo et demande 54 secondes, d'où son
+    # cache (voir `flore.lire`), sans lequel l'outil mettrait une minute à
+    # s'ouvrir à chaque démarrage.
+    dire("Lecture des classeurs…")
     try:
         cs = charger_classeurs(racine)
     except Exception:  # noqa: BLE001
         cs = {}
     ref = reference_mod.Reference(cs) if cs else None
     if ref is not None:
+        tenus = [c for cle, c in cs.items() if cle not in GROUPES_HORS_VEILLE]
         citations.append(
-            f"Statuts : classeurs UNITe, {len(ref)} taxons, tenus par la "
+            f"Statuts : classeurs UNITe, "
+            f"{sum(len(c.taxons) for c in tenus)} taxons, tenus par la "
             f"responsable environnement"
         )
+        # Le classeur de flore se cite à part : il n'a ni le même auteur ni
+        # la même origine, et la Licence Ouverte veut qu'on dise laquelle.
+        for cle in GROUPES_HORS_VEILLE:
+            classeur = cs.get(cle)
+            if classeur is None:
+                continue
+            edition = classeur.citations.get("_edition", "")
+            citations.append(
+                f"Statuts de la flore : {classeur.chemin.name}, "
+                f"{len(classeur.taxons)} taxons"
+                + (f" — {edition}" if edition else "")
+            )
     return Contexte(index=index, statuts=statuts, citations=citations,
                     versions=refs, racine=racine, reference=ref)
 
@@ -125,6 +166,8 @@ def lancer_veille(contexte: Contexte, cs: dict[str, classeurs.Classeur],
     Renvoie (résultat, nombre masqué) — afficher le second compte autant que le
     premier : il dit que la mémoire travaille.
     """
+    cs = {cle: classeur for cle, classeur in cs.items()
+          if cle not in GROUPES_HORS_VEILLE}
     res = veille.analyser(cs, contexte.index, contexte.statuts,
                           groupes=groupes, territoires=territoires)
     avant = len(res.constats)
@@ -150,7 +193,12 @@ def territoires_disponibles(cs: dict[str, classeurs.Classeur],
     vocabulaire de celle qui choisit. La traduction se fait au filtrage.
     """
     trouves: set[str] = set()
-    for cl in cs.values():
+    for cle, cl in cs.items():
+        # Le filtre doit proposer ce que la veille sait traiter, et elle ne
+        # traite pas la flore : ses 29 régions auraient allongé la liste de
+        # territoires sans qu'aucun constat n'en sorte jamais.
+        if cle in GROUPES_HORS_VEILLE:
+            continue
         for colonne in cl.colonnes:
             if not colonne.comparable or colonne.territoire_bdc in veille.TERRITOIRES_SUPRA:
                 continue
@@ -166,7 +214,7 @@ def territoires_disponibles(cs: dict[str, classeurs.Classeur],
 CLES_ZONAGES = ("znieff", "natura2000", "espaces_proteges",
                 "patrimoine_geologique", "ens", "zico",
                 "mc_polygones", "mc_lineaires", "mc_ponctuelles",
-                "zones_humides")
+                "mc_communes", "zones_humides")
 
 
 def preparer_zonages(racine: Path, progression=None) -> tuple[dict[str, str], list[str]]:

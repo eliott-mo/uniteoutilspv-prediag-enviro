@@ -30,14 +30,11 @@ from prediag_enviro import bdc, classeurs, rapport, referentiels, taxref, veille
 from prediag_enviro.memoire import Memoire  # noqa: E402
 from prediag_enviro import chemins, service  # noqa: E402
 
-MOTIFS = {
-    "oiseaux": "*oiseaux*.xlsx",
-    "mammiferes": "*mammif*.xlsx",
-    "amphib-reptiles": "*amphib*.xlsx",
-    "insectes": "*insectes*.xlsx",
-    "macroheteroceres": "*macroh*.xlsx",
-    "araignees": "*araign*.xlsx",
-}
+# Une seule table, dans `service`. Il y en avait deux, identiques, et c'est
+# exactement ce que le module `service` existe pour éviter : ajouter la flore
+# d'un seul côté aurait donné une interface qui la lit et une ligne de
+# commande qui l'ignore.
+MOTIFS = service.MOTIFS
 
 
 def main() -> int:
@@ -88,6 +85,11 @@ def main() -> int:
     if not cs:
         print(f"  aucun classeur dans {dossier}/ — y déposer les fichiers B-Statuts")
         return 1
+    for oublie in classeurs.non_reconnus(dossier, MOTIFS):
+        print(f"  ⚠ {oublie} n'est reconnu par aucun motif : il n'est pas lu.")
+    # La veille ne porte que sur la curation de la responsable environnement.
+    cs = {cle: c for cle, c in cs.items()
+          if cle not in service.GROUPES_HORS_VEILLE}
     for groupe, cl in cs.items():
         comparables = sum(1 for c in cl.colonnes if c.comparable)
         print(f"  {groupe:18s} {len(cl.taxons):>5} taxons · {len(cl.colonnes):>3} colonnes "

@@ -108,6 +108,31 @@ def _fichiers_oublies() -> list[str]:
     return oublies
 
 
+def _types_sans_pluriel() -> tuple[list[str], str]:
+    """Types de zonages dont le pluriel n'est pas déclaré, et pourquoi sinon.
+
+    Même piège que `_fichiers_oublies`, et il a déjà coûté : le registre des
+    zonages gagne des types régulièrement, celui qui n'a pas son pluriel
+    ressort au singulier, et le prédiagnostic de Bédarieux a annoncé « on
+    recense 2 Mesure compensatoire ». Le repli au singulier est voulu — un
+    prédiag ne doit pas s'arrêter là-dessus — mais il n'a pas à atteindre la
+    production.
+
+    L'import est protégé parce que `zonages` tire geopandas : une publication
+    ne doit pas échouer parce que l'environnement n'est pas activé. On dit
+    alors que le contrôle n'a pas tourné, plutôt que de laisser croire qu'il
+    est passé.
+    """
+    sys.path.insert(0, str(RACINE / "src"))
+    try:
+        from prediag_enviro import zonages
+        return zonages.types_sans_pluriel(), ""
+    except Exception as e:  # noqa: BLE001
+        return [], f"{type(e).__name__} — {e}"
+    finally:
+        sys.path.pop(0)
+
+
 def _ignorer(_dossier, noms):
     return {n for n in noms if n in EXCLUS or n.endswith(".pyc")}
 
@@ -307,6 +332,19 @@ def main() -> int:
             print(f"      {nom}")
         print("    S'ils doivent partir en production, les ajouter à CODE "
               "dans publier.py.\n")
+
+    sans_pluriel, echec = _types_sans_pluriel()
+    if echec:
+        print(f"\n  ⚠ Pluriels des types de zonages : contrôle non effectué "
+              f"({echec})\n")
+    elif sans_pluriel:
+        print("\n  ⚠ Types de zonages sans pluriel déclaré. Le document les "
+              "annoncera au singulier —")
+        print('    « on recense 2 Mesure compensatoire » :')
+        for libelle in sans_pluriel:
+            print(f"      {libelle}")
+        print("    Les ajouter à PLURIELS dans "
+              "src/prediag_enviro/zonages.py.\n")
 
     publier(destination, avec_donnees=args.avec_donnees, essai=args.essai)
     return 0

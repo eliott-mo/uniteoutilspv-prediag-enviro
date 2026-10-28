@@ -577,8 +577,14 @@ def casse_lisible(nom: str) -> str:
 #: Une règle automatique ne tient pas : « ZNIEFF de type I » est invariable,
 #: « Zone Spéciale de Conservation » accorde deux mots, « Parc national » fait
 #: « Parcs nationaux » et « Site Ramsar » garde son nom propre au singulier.
-#: Dix-huit entrées écrites une fois valent mieux qu'un algorithme qui se
-#: trompe sur un cas tous les cinq rapports.
+#: Une entrée écrite une fois vaut mieux qu'un algorithme qui se trompe sur un
+#: cas tous les cinq rapports.
+#:
+#: En contrepartie, la table se laisse distancer par le registre, qui gagne
+#: des types régulièrement : ceux d'octobre — mesures compensatoires, zones
+#: humides — n'y figuraient pas, et le prédiagnostic de Bédarieux a annoncé
+#: « on recense 2 Mesure compensatoire ». D'où `types_sans_pluriel()`, que
+#: `publier.py` appelle avant chaque mise en production.
 PLURIELS = {
     "ZNIEFF de type I": "ZNIEFF de type I",
     "ZNIEFF de type II": "ZNIEFF de type II",
@@ -599,6 +605,34 @@ PLURIELS = {
     "Terrain du Conservatoire du Littoral":
         "Terrains du Conservatoire du Littoral",
     "Site Ramsar": "Sites Ramsar",
+    # Les types d'espaces protégés venus de la relecture de la responsable
+    # environnement. Le complément reste au singulier : chaque périmètre
+    # protège bien une réserve, et la zone d'une réserve de biosphère ne se
+    # démultiplie pas — même règle que « Parcs nationaux (zone cœur) ».
+    "Périmètre de protection d'une réserve naturelle nationale":
+        "Périmètres de protection d'une réserve naturelle nationale",
+    "Périmètre de protection d'une réserve naturelle régionale":
+        "Périmètres de protection d'une réserve naturelle régionale",
+    "Zone de protection renforcée d'une réserve naturelle":
+        "Zones de protection renforcée d'une réserve naturelle",
+    "Réserve intégrale de parc national":
+        "Réserves intégrales de parc national",
+    "Réserve nationale de chasse et de faune sauvage":
+        "Réserves nationales de chasse et de faune sauvage",
+    "Réserve de biosphère (zone centrale)":
+        "Réserves de biosphère (zone centrale)",
+    "Réserve de biosphère (zone tampon)":
+        "Réserves de biosphère (zone tampon)",
+    "Réserve de biosphère (zone de transition)":
+        "Réserves de biosphère (zone de transition)",
+    # Patrimoine géologique et labels internationaux. « Géoparcs mondiaux
+    # UNESCO » est l'intitulé que l'archive porte elle-même au pluriel.
+    "Arrêté de protection de géotope": "Arrêtés de protection de géotope",
+    "Arrêté de liste de sites d'intérêt géologique":
+        "Arrêtés de liste de sites d'intérêt géologique",
+    "Géoparc mondial UNESCO": "Géoparcs mondiaux UNESCO",
+    "Bien du patrimoine mondial de l'UNESCO":
+        "Biens du patrimoine mondial de l'UNESCO",
     # Deux origines pour un même type : le flux WFS de l'INPN, dont la couche
     # est annoncée « en construction », et ce que l'équipe dépose
     # département par département (voir sources_locales.py).
@@ -606,14 +640,48 @@ PLURIELS = {
     "Site d'intérêt géologique (INPG)": "Sites d'intérêt géologique (INPG)",
     "Zone Importante pour la Conservation des Oiseaux":
         "Zones Importantes pour la Conservation des Oiseaux",
+    # Les deux familles d'octobre, celles par qui le défaut s'est vu.
+    "Mesure compensatoire": "Mesures compensatoires",
+    "Mesure compensatoire (linéaire)": "Mesures compensatoires (linéaires)",
+    "Mesure compensatoire (ponctuelle)":
+        "Mesures compensatoires (ponctuelles)",
+    "Mesure compensatoire non localisée":
+        "Mesures compensatoires non localisées",
+    "Zone humide ou tourbière (BCAE 2)":
+        "Zones humides ou tourbières (BCAE 2)",
+    # Protections de paysage : extraites dans leur propre famille, qu'aucun
+    # tableau ne parcourt encore. Leur pluriel est écrit quand même — le jour
+    # où la partie paysage s'écrira, il n'y aura pas à y repenser.
+    "Site classé": "Sites classés",
+    "Grand Site de France": "Grands Sites de France",
+    "Projet de Grand Site de France": "Projets de Grand Site de France",
 }
 
 
 def pluriel(type_libelle: str, nombre: int) -> str:
-    """Le type au nombre voulu — « 2 Zones de Protection Spéciale »."""
+    """Le type au nombre voulu — « 2 Zones de Protection Spéciale ».
+
+    Un libellé absent de la table ressort au singulier : un prédiagnostic ne
+    doit pas s'arrêter sur une table d'affichage. Mais ce repli est muet, et
+    c'est `types_sans_pluriel()` qui l'empêche d'atteindre la production.
+    """
     if nombre <= 1:
         return type_libelle
     return PLURIELS.get(type_libelle, type_libelle)
+
+
+def types_sans_pluriel() -> list[str]:
+    """Types du registre dont le pluriel n'est pas écrit dans `PLURIELS`.
+
+    Appelée par `publier.py` avant chaque mise en production, là où une
+    relecture est encore possible. Faute de ce contrôle, les types ajoutés au
+    registre depuis l'écriture de la table sont partis en production sans
+    pluriel, et le prédiagnostic de Bédarieux a annoncé « on recense 2 Mesure
+    compensatoire » : une faute d'accord dans un livrable, pour une ligne
+    oubliée dans une table d'affichage.
+    """
+    return sorted({source.type_libelle for source in registre()
+                   if source.type_libelle not in PLURIELS})
 
 
 #: Le nom scientifique s'arrête au premier mot qui n'est pas une épithète :
@@ -1528,6 +1596,24 @@ def registre() -> list[SourceZonage]:
             colonnes_nom=("projet",),
             enrichir=_enrichir_mesure_compensatoire,
         ))
+    # Les mesures rattachées à une commune sans localisation précise. Famille
+    # à part, que `FAMILLES` ne cite pas : ni tableau ni carte ne les reprend,
+    # et c'est tout l'objet — leur polygone est celui de la commune entière.
+    # Le document les **compte** sous le tableau des mesures compensatoires,
+    # pour que « aucune mesure » ne se confonde plus avec « une mesure que
+    # personne n'a su placer ». Voir `_mesures_non_localisees`.
+    sources.append(SourceZonage(
+        cle="mc_communes", archive="mc_communes",
+        motif_shp="MC_COMMUNES.gpkg", couche=referentiels.COUCHE_PAGINEE,
+        famille="compensation_commune",
+        type_libelle="Mesure compensatoire non localisée",
+        colonnes_id=("identifiant", "identifian"),
+        colonnes_nom=("projet",),
+        # Une mesure qui a par ailleurs une emprise précise figure déjà dans
+        # les trois couches géométriques : la compter ici la doublerait.
+        filtre_colonne="autres_emprises", filtre_valeurs=("false",),
+        enrichir=_enrichir_mesure_compensatoire,
+    ))
     sources.append(SourceZonage(
         cle="zico", archive="zico", motif_shp="ZICO",
         famille="inventaire",

@@ -154,6 +154,12 @@ class Classeur:
     taxons: list[LigneTaxon]
     colonnes: list[ColonneStatut]
     avertissements: list[str] = field(default_factory=list)
+    #: Référence bibliographique par champ, quand le classeur la porte. Les
+    #: six B-Statuts n'en ont pas — leurs sources vivent dans un onglet
+    #: « Textes de référence » que rien ne lit encore. Le classeur de flore,
+    #: lui, cite chaque colonne avec son année, et c'est ce qui permet de le
+    #: citer proprement là où BDC-Statuts ne le permet pas.
+    citations: dict[str, str] = field(default_factory=dict)
 
     def colonne(self, type_bdc: str, territoire_bdc: str | None = None) -> ColonneStatut | None:
         for c in self.colonnes:
@@ -327,7 +333,18 @@ def _dictionnaire_depuis_statuts(ws) -> tuple[list[ColonneStatut], list[str]]:
 
 
 def lire(chemin: Path, groupe: str) -> Classeur:
-    """Charge un classeur B-Statuts. Aucune écriture, jamais."""
+    """Charge un classeur. Aucune écriture, jamais.
+
+    Deux dispositions coexistent depuis l'arrivée de la flore, et c'est **la
+    feuille qui tranche, pas le nom du fichier** : un classeur renommé doit
+    continuer d'être lu, et un fichier qui ressemble à un B-Statuts sans en
+    être un doit échouer bruyamment plutôt que de rendre zéro taxon.
+    """
+    from . import chemins, flore
+    if flore.est_classeur_flore(chemin):
+        return flore.lire(chemin, groupe,
+                          cache=chemins.referentiels() / "flore_index.pkl")
+
     wb = openpyxl.load_workbook(chemin, data_only=True)
     if "Statuts" not in wb.sheetnames:
         wb.close()
@@ -375,9 +392,23 @@ def lire(chemin: Path, groupe: str) -> Classeur:
                     colonnes=colonnes, avertissements=avert)
 
 
+def _candidats(dossier: Path) -> list[Path]:
+    """Classeurs déposés, hors fichiers de travail d'Excel."""
+    return sorted(p for p in dossier.glob("*.xlsx")
+                  if not p.name.startswith("~$"))
+
+
 def lire_tous(dossier: Path, correspondances: dict[str, str]) -> dict[str, Classeur]:
-    """Charge les classeurs présents dans `dossier` selon `{groupe: motif}`."""
+    """Charge les classeurs présents dans `dossier` selon `{groupe: motif}`.
+
+    Un fichier qu'aucun motif ne reconnaît n'est pas abandonné pour autant :
+    s'il porte la signature du classeur de flore, il est pris quand même. Le
+    dépôt de « A - Statut FLORE.xlsx » a montré le trou — un classeur posé
+    dans le bon dossier disparaissait en silence faute de s'appeler comme
+    les six autres, et rien nulle part ne le disait.
+    """
     sortie: dict[str, Classeur] = {}
+    pris: set[Path] = set()
     for groupe, motif in correspondances.items():
         trouves = sorted(dossier.glob(motif))
         if not trouves:
@@ -385,4 +416,24 @@ def lire_tous(dossier: Path, correspondances: dict[str, str]) -> dict[str, Class
         if len(trouves) > 1:
             trouves = [max(trouves, key=lambda p: p.stat().st_mtime)]
         sortie[groupe] = lire(trouves[0], groupe)
+        pris.add(trouves[0])
+
+    from . import flore
+    for chemin in _candidats(dossier):
+        if chemin in pris or "flore" in sortie:
+            continue
+        if flore.est_classeur_flore(chemin):
+            sortie["flore"] = lire(chemin, "flore")
     return sortie
+
+
+def non_reconnus(dossier: Path, correspondances: dict[str, str]) -> list[str]:
+    """Classeurs déposés qu'aucun motif ni aucune signature ne reconnaît.
+
+    À afficher : c'est le seul moyen qu'a la responsable environnement de
+    savoir qu'un fichier qu'elle vient de déposer ne sera pas lu.
+    """
+    from . import flore
+    pris = {p for motif in correspondances.values() for p in dossier.glob(motif)}
+    return [chemin.name for chemin in _candidats(dossier)
+            if chemin not in pris and not flore.est_classeur_flore(chemin)]

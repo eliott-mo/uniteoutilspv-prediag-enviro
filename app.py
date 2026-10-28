@@ -30,6 +30,7 @@ import streamlit as st
 RACINE = Path(__file__).resolve().parent
 sys.path.insert(0, str(RACINE / "src"))
 
+from prediag_enviro import classeurs as mod_classeurs  # noqa: E402
 from prediag_enviro import communes as mod_communes  # noqa: E402
 from prediag_enviro import rapport as mod_rapport  # noqa: E402
 from prediag_enviro import recoupement as mod_recoupement  # noqa: E402
@@ -255,6 +256,16 @@ with onglet_a:
                     )
 
     with col_classeurs:
+        # Un classeur déposé et non reconnu disparaissait en silence : seul
+        # le cas « aucun classeur du tout » était signalé. C'est le dépôt du
+        # classeur de flore qui l'a montré.
+        for oublie in mod_classeurs.non_reconnus(chemins.classeurs(),
+                                                 service.MOTIFS):
+            st.warning(
+                f"**{oublie}** est dans le dossier des classeurs mais n'est "
+                "reconnu par aucun motif : il n'est pas lu. Le renommer selon "
+                f"l'un des motifs attendus ({', '.join(service.MOTIFS.values())})."
+            )
         if not cs:
             st.warning(
                 f"Aucun classeur dans `{chemins.classeurs()}`. Y déposer les "

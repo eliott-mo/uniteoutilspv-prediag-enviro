@@ -101,24 +101,41 @@ CREME_CORPS = "EEECE1"
 #: référence : LC vert (127 cellules), NT jaune pâle (45), VU jaune (24),
 #: EN orange (7), CR rouge (5), NA gris (32), DD gris clair (3).
 #:
-#: `RE`, `EX` et `CR*` n'y figurent pas — aucune espèce du document n'est dans
-#: ce cas. Ils prennent le rouge de `CR`, dont ils sont les degrés supérieurs :
-#: c'est une extrapolation, mais les laisser en crème sous-signalerait la
-#: catégorie la plus grave de l'échelle.
+#: `RE`, `EW` et `EX` n'y figurent pas, et la première version les a mis au
+#: rouge de `CR` faute de mieux. C'était une extrapolation, et elle était
+#: fausse : **les classeurs portent l'échelle complète**, en mise en forme
+#: conditionnelle, et personne n'était allé la lire. `RE` y est violet,
+#: `EW` violet foncé, `EX` noir — les trois degrés de la disparition, que
+#: l'UICN distingue justement du rouge de la menace. Les classeurs comptent
+#: 463 cellules `RE` et 2 cellules `EX` (le Bouquetin des Pyrénées, éteint
+#: en 2000), qui sortaient donc en « en danger critique ».
+#:
+#: `CR*` garde le rouge, et cette fois c'est vérifié : ses règles filtrent sur
+#: le préfixe `CR`, donc `CR*` prend la couleur de `CR` chez elle aussi.
 COULEURS_STATUT = {
     "LC": "78B74A",
     "NT": "FBF2CA",
     "VU": "FFED00",
     "EN": "FBBF00",
-    "CR": "D3001B", "CR*": "D3001B", "RE": "D3001B", "EX": "D3001B",
-    "DD": "D3D4D5", "NE": "D3D4D5",
+    "CR": "D3001B", "CR*": "D3001B",
+    "RE": "5A1A63",
+    "EW": "3D1951",
+    "EX": "000000",
+    # `NE` — non évalué — est blanc chez elle, là où `DD` est gris clair. Les
+    # deux se ressemblent mais ne disent pas la même chose : `DD` est une
+    # évaluation qui a manqué de données, `NE` une évaluation qui n'a pas eu
+    # lieu. On garde sa distinction.
+    "DD": "D3D4D5", "NE": "FFFFFF",
     "NA": "929395", "NAa": "929395", "NAb": "929395",
     "NAc": "929395", "NAd": "929395",
 }
 
 #: Fonds sur lesquels le texte passe en blanc. Le document de référence ne le
-#: fait que sur le gris — le rouge `CR` y garde un texte noir.
-FONDS_SOMBRES = {"929395"}
+#: fait que sur le gris — le rouge `CR` y garde un texte noir. Les trois fonds
+#: de la disparition s'y ajoutent : ils sont trop sombres pour du texte noir,
+#: et les classeurs eux-mêmes y mettent du blanc (`<color theme="0"/>` dans
+#: leur mise en forme conditionnelle).
+FONDS_SOMBRES = {"929395", "5A1A63", "3D1951", "000000"}
 
 #: Marge intérieure des cellules, en vingtièmes de point. Serrée : les tableaux
 #: d'espèces ont jusqu'à dix colonnes sur une page A4.

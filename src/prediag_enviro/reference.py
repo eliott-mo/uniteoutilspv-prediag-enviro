@@ -152,6 +152,28 @@ class Reference:
         """
         return str(cd_ref).strip() in self._par_cd
 
+    def interroge(self, cd_ref: str, type_statut: str,
+                  territoire: str) -> bool:
+        """Le classeur qui porte ce taxon pose-t-il seulement la question ?
+
+        Il fallait distinguer une troisième fois. `connait()` sépare
+        « absente du classeur » de « case vide » ; restait « le classeur n'a
+        pas la colonne ». Le classeur de flore n'en a aucune pour les espèces
+        déterminantes de ZNIEFF : son silence là-dessus n'est pas un constat,
+        c'est une question qu'il ne pose pas, et BDC-Statuts peut y répondre
+        sans contredire personne.
+
+        La nuance se joue au classeur qui porte le taxon, non à l'ensemble :
+        le classeur des macrohétérocères déclare ses espèces déterminantes,
+        celui de la flore non, et c'est bien celui qui porte la plante qui
+        décide pour elle.
+        """
+        fiche = self._par_cd.get(str(cd_ref).strip())
+        if fiche is None:
+            return False
+        return any(_correspond(colonne, type_statut, territoire)
+                   for colonne in fiche.classeur.colonnes)
+
     # ------------------------------------------------- interface bdc.Statuts
 
     def couvre(self, type_statut: str, territoire: str) -> bool:
@@ -206,3 +228,82 @@ class Reference:
             if e.rendu not in vus:
                 vus.append(e.rendu)
         return ", ".join(vus)
+
+
+class AvecRepli:
+    """Les classeurs, et BDC-Statuts pour les espèces qu'ils ne portent pas.
+
+    **Décision du 28 octobre 2026.** « Le classeur fait foi » laissait la flore
+    sans aucun statut : 802 plantes à Bédarieux, toutes colonnes vides, alors
+    que BDC en documente près de 750 et signale six espèces protégées. Une
+    colonne vide se lit « non protégée » — le document affirmait donc le
+    contraire de la réalité sur un point réglementaire.
+
+    Le repli se décide **colonne par colonne, jamais cellule par cellule.**
+    Si le classeur qui porte le taxon pose la question — s'il a la colonne,
+    et qu'elle est renseignée quelque part —, il fait foi jusque dans ses
+    blancs : une case vide y est une absence de statut constatée, pas une
+    lacune à combler. BDC ne parle que là où le classeur ne demande rien :
+    taxon absent de tous les classeurs, ou type de statut dont celui qui le
+    porte n'a pas de colonne.
+
+    La nuance est venue du classeur de flore, qui n'a aucune colonne
+    « déterminante ZNIEFF ». Une règle purement espèce par espèce l'aurait
+    rendu muet sur ce point dès son intégration, alors que BDC y répond —
+    on aurait perdu une colonne en croyant en gagner cinq.
+
+    Le document nomme la source employée sous chaque tableau concerné —
+    voir `rapport_prediag._absence_de_reference` et `_colonnes_repliees`.
+
+    Ce que l'arrivée du classeur de flore a changé, mesuré sur Bédarieux :
+    749 listes rouges France, 213 européennes et 8 protections passent de BDC
+    au classeur, tandis que les 64 espèces déterminantes de ZNIEFF restent à
+    BDC. Le repli n'a donc pas disparu avec le classeur — il s'est déplacé
+    vers les seules colonnes que ce classeur ne porte pas.
+    """
+
+    def __init__(self, reference: Reference, statuts: bdc.Statuts):
+        self.reference = reference
+        self.statuts = statuts
+
+    def __len__(self) -> int:
+        return len(self.reference)
+
+    def _source(self, cd_ref: str, type_statut: str, territoire: str):
+        return (self.reference
+                if self.reference.interroge(cd_ref, type_statut, territoire)
+                else self.statuts)
+
+    # ------------------------------------------- ce que `Reference` ajoute
+
+    def connait(self, cd_ref: str) -> bool:
+        """Toujours la question des classeurs : BDC n'y répond pas pour eux."""
+        return self.reference.connait(cd_ref)
+
+    def groupe_classeur(self, cd_ref: str) -> str:
+        return self.reference.groupe_classeur(cd_ref)
+
+    # ------------------------------------------------- interface bdc.Statuts
+
+    def couvre(self, type_statut: str, territoire: str) -> bool:
+        """L'un ou l'autre porte-t-il ce couple type/territoire ?
+
+        L'union est sans danger pour le choix du découpage régional, qui gate
+        sur `couvre` puis départage au nombre d'espèces réellement renseignées
+        (`territoire_regional`) : une région que seul BDC couvre passe la
+        grille mais marque zéro sur un tableau d'espèces qu'elle connaît, et
+        n'est donc retenue que là où le repli sert vraiment.
+        """
+        return (self.reference.couvre(type_statut, territoire)
+                or self.statuts.couvre(type_statut, territoire))
+
+    def entrees(self, cd_ref: str, type_statut: str,
+                territoire: str) -> list[bdc.Entree]:
+        source = self._source(cd_ref, type_statut, territoire)
+        return source.entrees(cd_ref, type_statut, territoire)
+
+    def rendu(self, cd_ref: str, type_statut: str, territoire: str,
+              periode: str | None = None,
+              filtre: tuple[str, ...] | None = None) -> str:
+        source = self._source(cd_ref, type_statut, territoire)
+        return source.rendu(cd_ref, type_statut, territoire, periode, filtre)

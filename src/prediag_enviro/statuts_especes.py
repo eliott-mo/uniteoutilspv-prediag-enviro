@@ -161,6 +161,21 @@ FAMILLES_ETUDE: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 )
 
 
+#: Groupes retirés du document, par décision et non par défaut de données.
+#:
+#: **Les poissons, arrêté le 28 octobre 2026.** Ils n'arrivent pas parce que
+#: quelqu'un les a cherchés : les dépôts sont des exports de commune entière,
+#: et le portail rend ce qu'il a. Les 14 poissons de Bédarieux sont venus avec
+#: l'export du SINP sans que personne les demande. Un parc photovoltaïque
+#: n'ayant pas d'incidence sur l'ichtyofaune, leur tableau occupait des pages
+#: sans rien apporter au raisonnement.
+#:
+#: Ils sont **écartés, pas perdus** : le document dit combien il en a mis de
+#: côté, pour qu'un relevé contenant une espèce aquatique remarquable ne
+#: disparaisse pas en silence.
+GROUPES_ECARTES: tuple[str, ...] = ("poissons",)
+
+
 def famille_etude(cle_groupe: str) -> str:
     """Volet de l'état initial auquel ce groupe se rattache."""
     for cle, _, groupes in FAMILLES_ETUDE:

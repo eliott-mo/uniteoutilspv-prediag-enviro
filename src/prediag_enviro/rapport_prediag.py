@@ -411,6 +411,70 @@ def _especes_par_groupe(resultat, contexte) -> dict[str, list]:
     return par_groupe
 
 
+def _ecarter(par_groupe: dict[str, list]) -> tuple[dict[str, list],
+                                                   dict[str, list]]:
+    """Sépare ce que le document tabule de ce qu'il met de côté.
+
+    `se.GROUPES_ECARTES` dit lesquels et pourquoi. On rend les deux moitiés
+    plutôt que de filtrer en silence : un groupe retiré du document doit y
+    être annoncé, faute de quoi son absence se confond avec l'absence
+    d'observation — exactement le défaut que les colonnes de flore vides
+    avaient révélé.
+    """
+    retenus = {cle: especes for cle, especes in par_groupe.items()
+               if cle not in se.GROUPES_ECARTES}
+    ecartes = {cle: especes for cle, especes in par_groupe.items()
+               if cle in se.GROUPES_ECARTES}
+    return retenus, ecartes
+
+
+def _phrase_ecartees(ecartes: dict[str, list]) -> str:
+    """« 14 espèces de poissons sont écartées de ce document. »"""
+    if not ecartes:
+        return ""
+    bouts, total = [], 0
+    for cle, especes in sorted(ecartes.items()):
+        groupe = se.groupe_par_cle(cle)
+        total += len(especes)
+        bouts.append(f"{len(especes)} espèce{'s' if len(especes) > 1 else ''} "
+                     f"{groupe.complement}")
+    pluriel = total > 1
+    return (
+        f"{', '.join(bouts)} {'sont' if pluriel else 'est'} "
+        f"écartée{'s' if pluriel else ''} de ce document. "
+        f"{'Elles arrivent' if pluriel else 'Elle arrive'} avec les exports "
+        f"de commune entière, sans qu'un projet photovoltaïque "
+        f"{'les' if pluriel else 'la'} concerne ; la liste recoupée "
+        f"{'les' if pluriel else 'la'} conserve."
+    )
+
+
+def _colonnes_repliees(contexte, jeu, retenues: list) -> list[str]:
+    """Colonnes remplies par BDC alors que le classeur porte bien le taxon.
+
+    Le classeur de flore n'a aucune colonne d'espèces déterminantes de
+    ZNIEFF : celle-là vient de BDC quand toutes ses voisines viennent du
+    classeur. Sans cette phrase, « statuts repris des classeurs UNITe »
+    couvrirait une colonne qui n'en vient pas — et la Licence Ouverte
+    demande de citer qui a produit la donnée, pas qui a produit le tableau.
+    """
+    reference = getattr(contexte, "reference", None)
+    if reference is None:
+        return []
+    connues = [e.cd_ref for e in retenues if reference.connait(e.cd_ref)]
+    if not connues:
+        return []          # le tableau entier est traité par _absence_de_reference
+    repliees = []
+    for colonne in jeu.colonnes:
+        lecture = jeu.lectures.get(colonne.cle)
+        if lecture is None:
+            continue
+        if not any(reference.interroge(cd, lecture.type_statut,
+                                       lecture.territoire) for cd in connues):
+            repliees.append(colonne.titre)
+    return repliees
+
+
 def _absence_de_reference(contexte, jeu, retenues: list) -> str:
     """Ce qu'il faut dire quand les classeurs ne couvrent pas ce groupe.
 
@@ -446,20 +510,27 @@ def _absence_de_reference(contexte, jeu, retenues: list) -> str:
                for type_statut in types
                for territoire in ("France métropolitaine", "Europe", jeu.region))
     )
-    complement = (f", quand BDC-Statuts en documente {su_de_bdc}"
-                  if su_de_bdc else "")
+    version = getattr(contexte.versions.get("bdc_statuts"), "version", "")
+    cite = "BDC-Statuts" + (f" v{version}" if version else "")
+    tous = len(inconnues) == len(retenues)
+    qui = ("Les classeurs de référence d'UNITe ne couvrent pas ce groupe"
+           if tous else
+           f"{len(inconnues)} des {len(retenues)} espèces ci-dessus ne "
+           "figurent pas dans les classeurs de référence d'UNITe")
 
-    if len(inconnues) == len(retenues):
+    # Le repli n'a rien trouvé non plus : la cellule vide reste une cellule
+    # vide, et c'est encore ce cas qu'il faut nommer.
+    if not su_de_bdc:
         return (
-            "Les classeurs de référence d'UNITe ne couvrent pas ce groupe : "
-            "les colonnes de statut ci-dessus sont vides faute de référence, "
-            "et non parce que ces espèces n'en porteraient aucun"
-            f"{complement}."
+            f"{qui}, et {cite} n'en documente aucune : les cellules "
+            "correspondantes sont vides faute de référence, et non parce que "
+            "ces espèces n'en porteraient aucune."
         )
     return (
-        f"{len(inconnues)} des {len(retenues)} espèces ci-dessus ne figurent "
-        "pas dans les classeurs de référence d'UNITe : leurs cellules sont "
-        f"vides faute de référence, et non faute de statut{complement}."
+        f"{qui} : leurs statuts sont repris de {cite}, Muséum national "
+        f"d'Histoire naturelle / PatriNat, qui en documente {su_de_bdc}. "
+        "Les cellules restées vides le sont faute de statut connu de cette "
+        "source."
     )
 
 
@@ -506,6 +577,18 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
     avertissement = _absence_de_reference(contexte, jeu, retenues)
     if avertissement:
         rapport.para(avertissement)
+    repliees = _colonnes_repliees(contexte, jeu, retenues)
+    if repliees:
+        version = getattr(contexte.versions.get("bdc_statuts"), "version", "")
+        cite = "BDC-Statuts" + (f" v{version}" if version else "")
+        pluriel = len(repliees) > 1
+        rapport.para(
+            f"{'Les colonnes' if pluriel else 'La colonne'} "
+            f"« {' », « '.join(repliees)} » "
+            f"{'sont reprises' if pluriel else 'est reprise'} de {cite} : "
+            f"le classeur de référence de ce groupe ne "
+            f"{'les' if pluriel else 'la'} porte pas."
+        )
     return len(lignes)
 
 
@@ -526,6 +609,12 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
             rapport.sous_sous_partie(TITRES_ZONAGES.get(famille, titre_interne))
             for phrase in _constat_famille(retenus, projet):
                 rapport.para(phrase)
+            # Avant le `continue` : c'est justement quand le tableau est vide
+            # que la mention compte le plus.
+            if famille == "compensation":
+                mention = _mesures_non_localisees(resultat_zonages)
+                if mention:
+                    rapport.para(mention)
             if not retenus:
                 continue
             rapport.tableau(
@@ -599,7 +688,11 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
     )
 
     comptes = _compter_par_famille_etude(resultat_especes, contexte)
-    par_groupe = _especes_par_groupe(resultat_especes, contexte)
+    par_groupe, ecartes = _ecarter(
+        _especes_par_groupe(resultat_especes, contexte))
+    phrase_ecartees = _phrase_ecartees(ecartes)
+    if phrase_ecartees:
+        rapport.para(phrase_ecartees)
     # Avifaune, chiroptères et autre faune passent en paysage, comme dans le
     # document de référence : leurs tableaux comptent jusqu'à dix colonnes, et
     # les 16 cm d'une page portrait les écrasent.
@@ -639,6 +732,40 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
     rapport.orientation(paysage=avant)
 
 
+def _mesures_non_localisees(resultat_zonages) -> str:
+    """Les mesures compensatoires rattachées à une commune, sans plus.
+
+    La base du Cerema sépare les mesures dont l'emprise est connue de celles
+    dont on ne sait que la commune — ces dernières portent alors le polygone
+    communal entier. On ne les cartographie pas, parce que ce polygone fait
+    passer « quelque part dans la commune » pour « ici » : 11 km sur 13 à
+    Nice.
+
+    Les taire posait l'autre moitié du problème. Un tableau vide se lisait
+    « aucune mesure compensatoire », alors qu'il peut exister des mesures que
+    personne n'a su placer — 794 dans ce cas au niveau national. On les
+    compte donc sans les situer, ce qui est exactement ce que la source
+    permet d'affirmer.
+    """
+    mentions = resultat_zonages.par_famille("compensation_commune")
+    if not mentions:
+        return ""
+    noms = sorted({z.nom for z in mentions if z.nom})
+    detail = f" — {', '.join(noms[:3])}" if noms else ""
+    if len(noms) > 3:
+        reste = len(noms) - 3
+        detail += f", et {reste} autre{'s' if reste > 1 else ''}"
+    pluriel = len(mentions) > 1
+    return (
+        f"S'y ajoute{'nt' if pluriel else ''} {len(mentions)} mesure"
+        f"{'s' if pluriel else ''} compensatoire{'s' if pluriel else ''} "
+        f"rattachée{'s' if pluriel else ''} à une commune de l'aire d'étude "
+        f"sans localisation précise{detail}. La base ne leur connaît que la "
+        "commune : elles ne sont ni cartographiées ni tabulées ci-dessus, "
+        "mais leur existence ne peut pas être écartée du raisonnement."
+    )
+
+
 def _rayon_aer(projet: Projet) -> str:
     aire = projet.aire("AER")
     if aire is None or aire.rayon_m < 1000:
@@ -650,11 +777,10 @@ def _compter_par_famille_etude(resultat, contexte) -> dict[str, tuple[int, int]]
     """(total, à enjeu) par volet de l'état initial."""
     if resultat is None or not resultat.especes or contexte is None:
         return {}
-    par_groupe: dict[str, list] = {}
-    for espece in resultat.especes:
-        taxon = contexte.index.taxons.get(espece.cd_ref)
-        par_groupe.setdefault(
-            se.groupe_de(taxon, contexte.reference).cle, []).append(espece)
+    # Le même regroupement que les tableaux, et les mêmes écartés : un total
+    # annoncé qui ne correspondrait pas aux lignes tabulées en dessous serait
+    # pire que pas de total du tout.
+    par_groupe, _ = _ecarter(_especes_par_groupe(resultat, contexte))
 
     comptes: dict[str, list[int]] = {}
     for cle_groupe, especes in par_groupe.items():
@@ -725,7 +851,13 @@ def _annexes(rapport: Rapport, projet: Projet, resultat, contexte) -> list[str]:
         "catégories LC, DD, NA et NE n'y suffisent pas."
     )
 
-    par_groupe = _especes_par_groupe(resultat, contexte)
+    # L'annexe « fait foi sur ce qui a été consulté » : elle doit donc dire
+    # ce qu'elle ne tabule pas, sans quoi sa prétention à l'exhaustivité est
+    # fausse.
+    par_groupe, ecartes = _ecarter(_especes_par_groupe(resultat, contexte))
+    phrase_ecartees = _phrase_ecartees(ecartes)
+    if phrase_ecartees:
+        rapport.para(phrase_ecartees)
     traites: list[str] = []
     for groupe in se.GROUPES:
         especes = par_groupe.get(groupe.cle)

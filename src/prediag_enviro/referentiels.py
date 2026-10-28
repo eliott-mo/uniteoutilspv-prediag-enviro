@@ -38,6 +38,8 @@ NOMS_AFFICHES = {
     "mc_polygones": "Mesures compensatoires — emprises surfaciques (CEREMA)",
     "mc_lineaires": "Mesures compensatoires — emprises linéaires (CEREMA)",
     "mc_ponctuelles": "Mesures compensatoires — emprises ponctuelles (CEREMA)",
+    "mc_communes": "Mesures compensatoires — rattachées à une commune, "
+                   "sans localisation précise (CEREMA)",
     "zones_humides": "Zones humides et tourbières protégées (norme BCAE 2)",
 }
 

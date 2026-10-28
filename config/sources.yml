@@ -101,6 +101,23 @@ referentiels:
     attribution: "Ministère de l'Agriculture et de la Souveraineté alimentaire, diffusé par l'IGN (Géoplateforme)"
     fichier: "ZONES_HUMIDES.zip"
 
+  # La quatrième couche, celle qu'on avait écartée. Elle est désormais
+  # téléchargée — mais pour être **comptée, jamais cartographiée** : son
+  # polygone est celui de la commune entière, et la placer sur une carte
+  # ferait passer « une mesure quelque part dans la commune » pour « une
+  # mesure ici ». Sans elle, le document ne distinguait pas « aucune mesure »
+  # de « une mesure que personne n'a su localiser » — 794 au niveau national.
+  #
+  # `autres_emprises` vaut True quand la mesure a par ailleurs une emprise
+  # précise : celles-là figurent déjà dans les trois couches géométriques, et
+  # les recompter les ferait apparaître deux fois. Le registre les filtre.
+  mc_communes:
+    version: ""
+    url: "https://data.geopf.fr/wfs?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=MESURES_COMPENSATOIRES%3Aemprises_commune&OUTPUTFORMAT=application%2Fjson&SRSNAME=EPSG%3A2154"
+    pagine: 5000
+    attribution: "Cerema, diffusé par l'IGN (Géoplateforme)"
+    fichier: "MC_COMMUNES.zip"
+
   mc_ponctuelles:
     version: ""
     url: "https://data.geopf.fr/wfs?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=MESURES_COMPENSATOIRES%3Aemprises_ponctuelles&OUTPUTFORMAT=application%2Fjson&SRSNAME=EPSG%3A2154"
