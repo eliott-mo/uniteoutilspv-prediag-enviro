@@ -69,6 +69,9 @@ ALIAS_TERRITOIRE = {
     "hauts de france": "Hauts-de-France",
     "nouvelle aquitaine": "Nouvelle-Aquitaine",
     "grand est": "Grand Est",
+    # Le classeur des mammifères écrit « DZ PACA ». Sans cet alias, sa
+    # colonne n'était jamais lue sous ce territoire.
+    "paca": "Provence-Alpes-Côte-d'Azur",
 }
 
 _PERIODES = ("Nicheurs", "Hivernants", "De passage")
@@ -332,6 +335,46 @@ def _dictionnaire_depuis_statuts(ws) -> tuple[list[ColonneStatut], list[str]]:
     return colonnes, avert
 
 
+_DZ = re.compile(r"(?i)^dz\s+(.+)$")
+
+
+def _colonnes_dz(colonnes: list[ColonneStatut],
+                 entetes: list[str]) -> list[str]:
+    """Complète les colonnes déterminantes d'après les en-têtes de `Statuts`.
+
+    Pour ce type de colonne, **l'en-tête fait foi**, pour deux raisons :
+
+    * « Saisie étude » ne déclare pas toujours toutes les colonnes : celle des
+      amphibiens-reptiles n'en a qu'une, qui suit la « Région d'étude » — les
+      autres territoires resteraient invisibles ;
+    * une déclaration peut se tromper de territoire : celle des mammifères
+      annonçait « Provence-Alpes-Côte d'Azur » sur la colonne
+      « DZ Nord-Pas-de-Calais ».
+
+    Modifie `colonnes` en place ; rend les avertissements.
+    """
+    avertissements = []
+    vues = {c.index for c in colonnes}
+    for c in colonnes:
+        if c.type_bdc != "ZDET" or not 0 <= c.index < len(entetes):
+            continue
+        m = _DZ.match(entetes[c.index])
+        if m and territoire_bdc(m.group(1)) != c.territoire_bdc:
+            avertissements.append(
+                f"« Saisie étude » déclare « {c.territoire} » pour la colonne "
+                f"« {entetes[c.index]} » : c'est l'en-tête qui est suivi")
+            c.territoire = m.group(1).strip()
+            c.territoire_bdc = territoire_bdc(c.territoire)
+    for i, entete in enumerate(entetes):
+        m = _DZ.match(entete)
+        if m and i not in vues:
+            territoire = m.group(1).strip()
+            colonnes.append(ColonneStatut(
+                index=i, champ="DZ", type_bdc="ZDET", territoire=territoire,
+                territoire_bdc=territoire_bdc(territoire), libelle=entete))
+    return avertissements
+
+
 def lire(chemin: Path, groupe: str) -> Classeur:
     """Charge un classeur. Aucune écriture, jamais.
 
@@ -359,6 +402,7 @@ def lire(chemin: Path, groupe: str) -> Classeur:
     # Les en-têtes de Statuts complètent le dictionnaire (libellé brut, année
     # d'édition quand Marie l'a notée : « Liste rouge Pays de la Loire 2014 »).
     entetes = [_net(c.value) for c in ws[1]]
+    avert = avert + _colonnes_dz(colonnes, entetes)
     for c in colonnes:
         if 0 <= c.index < len(entetes):
             c.libelle = c.libelle or entetes[c.index]

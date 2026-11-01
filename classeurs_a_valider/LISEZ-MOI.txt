@@ -34,3 +34,21 @@ Europe ») et trois formulaires de relevé vierges. Aucun n'est lu par l'outil.
 Les noms de fichiers portent désormais les accents ; les motifs de `MOTIFS` les
 reconnaissent. Version précédente conservée dans
 %LOCALAPPDATA%\prediag-enviro\sauvegardes\classeurs_2026-10-16.
+
+01/11/2026 — six classeurs enrichis par l'outil, à la demande de la
+responsable environnement (mail du 06/10/2026 « Audit classeur Claude -
+retour ») : 89 colonnes « DZ », une par territoire où une liste
+déterminante ZNIEFF porte au moins une espèce du classeur, conditions de
+déterminance entre parenthèses (« Oui (MC, SO) », « Oui (dép. 33, 40) ») ;
+les huit domaines biogéographiques de Sardet & Defaut (2004) pour les
+orthoptères du classeur des insectes ; 107 cases des colonnes DZ existantes
+complétées ou précisées ; les colonnes correspondantes dans « Saisie
+étude », et trois défauts de saisie corrigés (mammifères, araignées,
+macrohétérocères). Sources : BDC-Statuts v18, et l'export INPN de la liste
+de Nouvelle-Aquitaine (08/10/2024), BDC n'en ayant pas les oiseaux.
+Écrits par Excel lui-même (outils/enrichir_classeurs.py), chaque case
+modifiée commentée avec sa valeur d'avant, chaque ajout porté au « Suivi
+modifs statuts ». Contrôle avant bascule : taxons et anciennes colonnes
+inchangés, nouvelles colonnes identiques aux listes, saisie éprouvée sous
+Excel, veille et prédiag de Bédarieux relancés. Version précédente
+conservée dans %LOCALAPPDATA%\prediag-enviro\sauvegardes\classeurs_2026-11-01.
