@@ -271,7 +271,20 @@ def _valeur_unique_par_territoire(cl: Classeur, t, type_bdc: str,
     return remplies[0] if len(remplies) == 1 else None
 
 
-def _statuts(cl: Classeur, idx: Index, statuts: Statuts) -> tuple[list[Constat], dict]:
+def _statuts(cl: Classeur, idx: Index, statuts: Statuts,
+             determinantes=None) -> tuple[list[Constat], dict]:
+    """Les cellules du classeur que BDC renseigne aussi, confrontées.
+
+    Les colonnes déterminantes ZNIEFF se confrontent aux listes de BDC
+    (`determinantes.Statuts`) quand on les donne, et non à son index : il ne
+    garde des listes que leurs lignes régionales, 15 % du tout, et pas leur
+    réserve. La comparaison porte alors sur la cellule entière — « Oui »
+    contre « Oui (SO) » est un écart, la liste restreignant l'espèce au
+    domaine sud-ouest.
+    """
+    def par_listes(type_bdc: str) -> bool:
+        return type_bdc == "ZDET" and determinantes is not None
+
     constats: list[Constat] = []
     couples: list[tuple[str, str]] = []
     ecartes: set[str] = set()
@@ -286,7 +299,8 @@ def _statuts(cl: Classeur, idx: Index, statuts: Statuts) -> tuple[list[Constat],
         if cle in vus:
             continue
         vus.add(cle)
-        if statuts.couvre(c.type_bdc, c.territoire_bdc):
+        source = determinantes if par_listes(c.type_bdc) else statuts
+        if source.couvre(c.type_bdc, c.territoire_bdc):
             couples.append(cle)
 
     apparies = compares = 0
@@ -301,15 +315,29 @@ def _statuts(cl: Classeur, idx: Index, statuts: Statuts) -> tuple[list[Constat],
             if trouve is None:
                 continue
             valeur, colonne = trouve
-            reference = statuts.code_unique(cd_ref, type_bdc, territoire)
-            if reference is None:
-                continue
-            compares += 1
-            if vocabulaire.equivalents(valeur, reference, type_bdc):
-                continue
-            detail = ""
+            if par_listes(type_bdc):
+                reference = determinantes.rendu(cd_ref, type_bdc, territoire)
+                if not reference:
+                    # Aucune liste chargée ne porte l'espèce : BDC n'a pas
+                    # toutes les listes, son silence n'est pas un « non ».
+                    continue
+                compares += 1
+                motif = determinantes.ecart(valeur, reference)
+                if motif is None:
+                    continue
+                listes = " | ".join(determinantes.listes.citations(territoire, {cd_ref}))
+                detail = f"{motif} — {listes}" if listes else motif
+            else:
+                reference = statuts.code_unique(cd_ref, type_bdc, territoire)
+                if reference is None:
+                    continue
+                compares += 1
+                if vocabulaire.equivalents(valeur, reference, type_bdc):
+                    continue
+                detail = ""
             if colonne.periode:
-                detail = f"colonne « {colonne.periode} » — BDC ne distingue pas les périodes"
+                detail = (detail + " · " if detail else "") + (
+                    f"colonne « {colonne.periode} » — BDC ne distingue pas les périodes")
             if colonne.annee:
                 detail = (detail + " · " if detail else "") + f"ton édition : {colonne.annee}"
             if statuts.cite(type_bdc):
@@ -422,8 +450,12 @@ def _controles_internes(classeurs: dict[str, Classeur],
 
 def analyser(classeurs: dict[str, Classeur], idx: Index, statuts: Statuts,
              groupes: list[str] | None = None,
-             territoires: list[str] | None = None) -> Resultat:
-    """Produit tous les constats. Aucune écriture dans les classeurs."""
+             territoires: list[str] | None = None,
+             determinantes=None) -> Resultat:
+    """Produit tous les constats. Aucune écriture dans les classeurs.
+
+    `determinantes` — les listes déterminantes ZNIEFF, voir `_statuts`.
+    """
     res = Resultat()
     ecartes: set[str] = set()
     for groupe, cl in classeurs.items():
@@ -431,7 +463,7 @@ def analyser(classeurs: dict[str, Classeur], idx: Index, statuts: Statuts,
             continue
         res.avertissements += [f"{groupe} : {a}" for a in cl.avertissements]
         res.constats += _coherence_et_taxonomie(cl, idx)
-        constats, couverture = _statuts(cl, idx, statuts)
+        constats, couverture = _statuts(cl, idx, statuts, determinantes)
         res.constats += constats
         res.couverture[groupe] = (couverture["cellules_comparees"], couverture["taxons"])
         ecartes.update(couverture["types_ecartes"])

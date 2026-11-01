@@ -368,7 +368,8 @@ with onglet_a:
             # une saisie qui ne correspond à rien renvoyait les statuts
             # nationaux — ce qui ressemblait à un résultat.
             territoires = st.multiselect(
-                "Territoires", service.territoires_disponibles(cs, ctx.statuts),
+                "Territoires", service.territoires_disponibles(
+                    cs, ctx.statuts, ctx.determinantes),
                 placeholder="Tous les territoires",
                 help="Régions que BDC-Statuts couvre pour vos classeurs, "
                      "écrites comme BDC les écrit. Les listes rouges nationale "

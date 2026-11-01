@@ -26,7 +26,8 @@ import yaml
 RACINE = Path(__file__).resolve().parent
 sys.path.insert(0, str(RACINE / "src"))
 
-from prediag_enviro import bdc, classeurs, rapport, referentiels, taxref, veille  # noqa: E402
+from prediag_enviro import (bdc, classeurs, determinantes, rapport,  # noqa: E402
+                            referentiels, taxref, veille)
 from prediag_enviro.memoire import Memoire  # noqa: E402
 from prediag_enviro import chemins, service  # noqa: E402
 
@@ -76,7 +77,10 @@ def main() -> int:
     statuts = bdc.Statuts.charger(refs["bdc_statuts"].chemin,
                                   spec_bdc["membres"]["principal"],
                                   spec_bdc["version"], cache / "bdc_index.pkl")
+    listes = determinantes.charger(refs["bdc_statuts"].chemin, spec_bdc["version"],
+                                   cache / "determinantes_index.pkl")
     print(f"  TaxRef : {len(idx):,} taxons · BDC : {len(statuts):,} statuts indexés"
+          f" · {len(listes.territoires())} territoires de listes ZNIEFF"
           .replace(",", " "))
 
     print("\nClasseurs")
@@ -97,7 +101,8 @@ def main() -> int:
 
     print("\nAnalyse…")
     res = veille.analyser(cs, idx, statuts, groupes=args.groupes,
-                          territoires=args.territoires)
+                          territoires=args.territoires,
+                          determinantes=determinantes.Statuts(listes))
 
     avant = len(res.constats)
     res.constats = [c for c in res.constats

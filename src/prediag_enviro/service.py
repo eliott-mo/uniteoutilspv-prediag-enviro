@@ -16,6 +16,7 @@ from pathlib import Path
 
 import yaml
 
+from . import determinantes as determinantes_mod
 from . import reference as reference_mod
 from . import (bdc, chemins, classeurs, extraits, referentiels,
                sources_locales, taxref, veille, zonages)
@@ -58,6 +59,10 @@ class Contexte:
     #: `None` quand aucun classeur n'est en place — une installation neuve,
     #: par exemple.
     reference: "reference_mod.Reference | None" = None
+    #: Les listes déterminantes ZNIEFF de BDC, lues au département : le repli
+    #: des colonnes ZDET du prédiagnostic, la référence de la veille pour ce
+    #: type.
+    determinantes: "determinantes_mod.Statuts | None" = None
 
     @property
     def source_statuts(self):
@@ -73,11 +78,27 @@ class Contexte:
           décision du 28 octobre 2026 (voir `reference.AvecRepli`).
 
         Dans les deux cas le document nomme la source employée, de sorte
-        qu'on sait toujours laquelle a servi.
+        qu'on sait toujours laquelle a servi. Et dans les deux cas, BDC répond
+        pour les espèces déterminantes de ZNIEFF par ses listes
+        départementales, non par son index qui n'en garde que les lignes
+        régionales.
         """
-        if self.reference is None:
+        if self.reference is None and self.determinantes is None:
             return self.statuts
-        return reference_mod.AvecRepli(self.reference, self.statuts)
+        reference = (self.reference if self.reference is not None
+                     else reference_mod.Reference({}))
+        return reference_mod.AvecRepli(reference, self.statuts,
+                                       self.determinantes)
+
+    def statuts_pour(self, departements: list[str]):
+        """`source_statuts`, pour les départements d'un projet.
+
+        Seules les listes déterminantes ZNIEFF en dépendent : voir
+        `determinantes.Statuts.pour`.
+        """
+        if self.determinantes is None:
+            return self.source_statuts
+        return self.source_statuts.pour(departements)
 
     @property
     def resume_versions(self) -> str:
@@ -119,6 +140,10 @@ def charger_contexte(racine: Path, forcer: bool = False,
     statuts = bdc.Statuts.charger(refs["bdc_statuts"].chemin,
                                   spec_bdc["membres"]["principal"],
                                   spec_bdc["version"], dossier / "bdc_index.pkl")
+    dire("Listes déterminantes ZNIEFF…")
+    listes = determinantes_mod.charger(refs["bdc_statuts"].chemin,
+                                       spec_bdc["version"],
+                                       dossier / "determinantes_index.pkl")
 
     # Le prédiagnostic ne peut pas se passer des classeurs : on les lit ici
     # plutôt que de les demander plus tard. Les six B-Statuts sont légers —
@@ -151,7 +176,8 @@ def charger_contexte(racine: Path, forcer: bool = False,
                 + (f" — {edition}" if edition else "")
             )
     return Contexte(index=index, statuts=statuts, citations=citations,
-                    versions=refs, racine=racine, reference=ref)
+                    versions=refs, racine=racine, reference=ref,
+                    determinantes=determinantes_mod.Statuts(listes))
 
 
 def charger_classeurs(racine: Path) -> dict[str, classeurs.Classeur]:
@@ -169,7 +195,8 @@ def lancer_veille(contexte: Contexte, cs: dict[str, classeurs.Classeur],
     cs = {cle: classeur for cle, classeur in cs.items()
           if cle not in GROUPES_HORS_VEILLE}
     res = veille.analyser(cs, contexte.index, contexte.statuts,
-                          groupes=groupes, territoires=territoires)
+                          groupes=groupes, territoires=territoires,
+                          determinantes=contexte.determinantes)
     avant = len(res.constats)
     res.constats = [c for c in res.constats if not memoire.deja_tranche(c.cle, c.propose)]
     return res, avant - len(res.constats)
@@ -181,7 +208,8 @@ def memoire_projet(racine: Path) -> Memoire:
 
 
 def territoires_disponibles(cs: dict[str, classeurs.Classeur],
-                            statuts: bdc.Statuts) -> list[str]:
+                            statuts: bdc.Statuts,
+                            determinantes=None) -> list[str]:
     """Territoires réellement confrontables, **tels que les classeurs les écrivent**.
 
     Proposer cette liste plutôt qu'une saisie libre évite deux pièges mesurés :
@@ -191,6 +219,10 @@ def territoires_disponibles(cs: dict[str, classeurs.Classeur],
 
     Les libellés rendus sont ceux des colonnes, pas ceux de BDC : c'est le
     vocabulaire de celle qui choisit. La traduction se fait au filtrage.
+
+    `determinantes` ajoute les territoires que seules les listes ZNIEFF
+    départementales couvrent — Midi-Pyrénées, dont BDC n'a aucune ligne
+    régionale.
     """
     trouves: set[str] = set()
     for cle, cl in cs.items():
@@ -202,7 +234,10 @@ def territoires_disponibles(cs: dict[str, classeurs.Classeur],
         for colonne in cl.colonnes:
             if not colonne.comparable or colonne.territoire_bdc in veille.TERRITOIRES_SUPRA:
                 continue
-            if statuts.couvre(colonne.type_bdc, colonne.territoire_bdc):
+            if statuts.couvre(colonne.type_bdc, colonne.territoire_bdc) or (
+                    determinantes is not None
+                    and determinantes.couvre(colonne.type_bdc,
+                                             colonne.territoire_bdc)):
                 trouves.add(colonne.territoire or colonne.territoire_bdc)
     # Tri sur la forme sans accents, sinon « Île-de-France » tombe après
     # « Rhône-Alpes » et on la cherche.

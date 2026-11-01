@@ -260,19 +260,50 @@ class AvecRepli:
     au classeur, tandis que les 64 espèces déterminantes de ZNIEFF restent à
     BDC. Le repli n'a donc pas disparu avec le classeur — il s'est déplacé
     vers les seules colonnes que ce classeur ne porte pas.
+
+    **Pour les espèces déterminantes de ZNIEFF, BDC répond par ses listes
+    (1er novembre 2026).** 85 % de leurs lignes sont saisies au département,
+    que son index range sous « Hérault » plutôt que sous « Occitanie » : le
+    repli ne trouvait donc rien là où un classeur n'a pas la colonne de la
+    région — 0 statut sur les 224 oiseaux, amphibiens et reptiles de
+    Bédarieux, 69 avec les listes. `determinantes.Statuts` les rapporte à
+    leur territoire, les écrit dans la convention des classeurs, et ne
+    retient pour un projet que celles qui couvrent ses départements (`pour`).
     """
 
-    def __init__(self, reference: Reference, statuts: bdc.Statuts):
+    def __init__(self, reference: Reference, statuts: bdc.Statuts,
+                 determinantes=None):
         self.reference = reference
         self.statuts = statuts
+        #: Les listes déterminantes ZNIEFF (`determinantes.Statuts`). Sans
+        #: elles, ZDET retombe sur l'index de BDC et ses lignes régionales.
+        self.determinantes = determinantes
 
     def __len__(self) -> int:
         return len(self.reference)
 
+    def pour(self, departements) -> "AvecRepli":
+        """Le même repli, pour les départements d'un projet.
+
+        Seules les listes déterminantes en dépendent — voir
+        `determinantes.Statuts.pour` : une colonne de classeur, une liste
+        rouge ou une protection régionale valent pour toute leur région.
+        """
+        if self.determinantes is None:
+            return self
+        return AvecRepli(self.reference, self.statuts,
+                         self.determinantes.pour(departements))
+
+    def _repli(self, type_statut: str):
+        """Ce que BDC dit d'un type, là où le classeur ne demande rien."""
+        if type_statut == "ZDET" and self.determinantes is not None:
+            return self.determinantes
+        return self.statuts
+
     def _source(self, cd_ref: str, type_statut: str, territoire: str):
         return (self.reference
                 if self.reference.interroge(cd_ref, type_statut, territoire)
-                else self.statuts)
+                else self._repli(type_statut))
 
     # ------------------------------------------- ce que `Reference` ajoute
 
@@ -295,7 +326,7 @@ class AvecRepli:
         n'est donc retenue que là où le repli sert vraiment.
         """
         return (self.reference.couvre(type_statut, territoire)
-                or self.statuts.couvre(type_statut, territoire))
+                or self._repli(type_statut).couvre(type_statut, territoire))
 
     def entrees(self, cd_ref: str, type_statut: str,
                 territoire: str) -> list[bdc.Entree]:

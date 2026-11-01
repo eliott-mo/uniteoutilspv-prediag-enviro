@@ -475,7 +475,7 @@ def _colonnes_repliees(contexte, jeu, retenues: list) -> list[str]:
     return repliees
 
 
-def _absence_de_reference(contexte, jeu, retenues: list) -> str:
+def _absence_de_reference(contexte, jeu, retenues: list, statuts=None) -> str:
     """Ce qu'il faut dire quand les classeurs ne couvrent pas ce groupe.
 
     **Une cellule vide affirme quelque chose.** Un lecteur qui voit la colonne
@@ -503,12 +503,18 @@ def _absence_de_reference(contexte, jeu, retenues: list) -> str:
     if not inconnues:
         return ""
 
-    types = {lecture.type_statut for lecture in jeu.lectures.values()}
+    # Ce que le tableau montre de ces espèces, colonne par colonne : elles
+    # n'ont pas d'autre source que BDC. Le décompte interrogeait l'index au
+    # territoire de la liste rouge régionale ; il ignorait donc les espèces
+    # déterminantes de ZNIEFF, que le repli lit au département, et pouvait
+    # écrire « n'en documente aucune » au-dessus d'une colonne remplie.
+    if statuts is None:
+        statuts = contexte.source_statuts
     su_de_bdc = sum(
         1 for e in inconnues
-        if any(contexte.statuts.rendu(e.cd_ref, type_statut, territoire)
-               for type_statut in types
-               for territoire in ("France métropolitaine", "Europe", jeu.region))
+        if any(valeur for cle, valeur in
+               se.ligne(jeu, statuts, e.cd_ref, "", "").items()
+               if cle in jeu.lectures)
     )
     version = getattr(contexte.versions.get("bdc_statuts"), "version", "")
     cite = "BDC-Statuts" + (f" v{version}" if version else "")
@@ -543,7 +549,7 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
     enjeu, parce que c'est sur elles que porte le raisonnement ; l'**annexe**
     donne la liste exhaustive, qui fait foi sur ce qui a été consulté.
     """
-    statuts, index = contexte.source_statuts, contexte.index
+    statuts, index = contexte.statuts_pour(projet.departements), contexte.index
     cd_refs = [e.cd_ref for e in especes]
     jeu = se.jeu(groupe, statuts, cd_refs, projet.departements)
     retenues = ([e for e in especes if se.a_enjeu(jeu, statuts, e.cd_ref)]
@@ -574,7 +580,7 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
                 f"recensées sur la commune "
                 f"{complement_de(projet.libelle_communes)}",
     )
-    avertissement = _absence_de_reference(contexte, jeu, retenues)
+    avertissement = _absence_de_reference(contexte, jeu, retenues, statuts)
     if avertissement:
         rapport.para(avertissement)
     repliees = _colonnes_repliees(contexte, jeu, retenues)
