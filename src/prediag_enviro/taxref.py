@@ -93,6 +93,17 @@ def nom_vernaculaire(brut: str) -> str:
 #: simplement de la clé de tri.
 _LIGATURES = {"Œ": "OE", "œ": "oe", "Æ": "AE", "æ": "ae"}
 
+#: Les articles que `_ARTICLE_FINAL` retire. On les remet tels quels avant de
+#: normaliser : la parenthèse laisse une double espace dans la clé de l'index
+#: — « alyte accoucheur  l » —, qu'aucun suffixe écrit à la main n'imite.
+_ARTICLES = ("(L')", "(Le)", "(La)", "(Les)", "(D')", "(De)", "(Des)", "(Du)")
+
+
+def _sans_ligature(texte: str) -> str:
+    for ligature, rendu in _LIGATURES.items():
+        texte = texte.replace(ligature, rendu)
+    return texte
+
 
 def cle_alphabetique(texte: str) -> str:
     """Clé de tri qui range « Écureuil » entre « Blaireau » et « Fouine ».
@@ -271,6 +282,48 @@ class Index:
                    if (self.taxons.get(c).groupe if c in self.taxons else "") in admis]
         # Aucun candidat du bon groupe : on ne force pas, l'appelant tranchera.
         return retenus
+
+    def cd_ref_exact(self, nom: str) -> str | None:
+        """Le cd_ref d'un nom tel que l'outil l'écrit, français ou scientifique.
+
+        Sans rapprochement : pour les listes que l'outil a lui-même écrites —
+        celles des zonages —, où un nom qui ne se retrouve pas n'a pas à être
+        deviné. Mais il faut défaire ce que l'écriture a fait au nom :
+
+        - `nom_vernaculaire` retire l'article final, que l'index garde :
+          « Alyte accoucheur (L') ». Sans le remettre, presque aucun
+          amphibien ni reptile ne se retrouvait ;
+        - « Œ » disparaît de la forme normalisée, et TaxRef écrit
+          « Oedicnème » : on essaie aussi « oe » ;
+        - deux espèces pour un même nom — « Pluvier doré », nom de
+          référence de Pluvialis apricaria et nom secondaire de P.
+          dominica — : on garde celle dont c'est le nom de référence.
+
+        Mesuré sur les zonages des Bouches-du-Rhône et de l'Hérault : 90 % des
+        noms se retrouvaient, 99 % désormais. Le reste porte un nom que TaxRef
+        n'emploie pas — « Vespertilion de Bechstein » pour le Murin.
+        """
+        vues = []
+        for brut in (nom, _sans_ligature(nom)):
+            forme = normaliser(brut)
+            if not forme or forme in vues:
+                continue
+            vues.append(forme)
+            for variante in [brut] + [f"{brut} {a}" for a in _ARTICLES]:
+                cle = normaliser(variante)
+                for table in (self.vern, self.sci):
+                    if cle in table:
+                        cd = (self._preferer_espece(table[cle])
+                              or self._de_reference(table[cle], forme))
+                        if cd:
+                            return cd
+        return None
+
+    def _de_reference(self, cds: list[str], forme: str) -> str | None:
+        """Parmi des homonymes, le seul dont `forme` est le nom de référence."""
+        retenus = [c for c in cds if c in self.taxons and normaliser(
+            _sans_ligature(nom_vernaculaire(self.taxons[c].nom_vern))) == forme]
+        return retenus[0] if len(retenus) == 1 else None
 
     def _preferer_espece(self, cds: list[str]) -> str | None:
         """Entre une espèce et ses sous-espèces de même nom, garder l'espèce."""

@@ -651,9 +651,43 @@ class Rapport:
 
     # --------------------------------------------------------------- tableaux
 
+    def _cellule_blocs(self, cellule, blocs: list, style: str,
+                       fond: str | None) -> None:
+        """Une cellule en plusieurs paragraphes : texte, titres, puces.
+
+        `blocs` porte des objets à `genre` (texte | titre | puce) et à
+        `morceaux` [(texte, gras)] — voir `zonages.blocs_interet`. Les titres
+        et les puces sont alignés à gauche, la puce en retrait suspendu pour
+        que les lignes suivantes s'alignent sous le nom du groupe.
+        """
+        for rang, bloc in enumerate(blocs):
+            paragraphe = (cellule.paragraphs[0] if rang == 0
+                          else cellule.add_paragraph())
+            self._style(paragraphe, style)
+            format_ = paragraphe.paragraph_format
+            if bloc.genre != "texte":
+                paragraphe.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            if bloc.genre == "titre":
+                format_.space_before = Pt(4)
+            if bloc.genre == "puce":
+                format_.left_indent = Cm(0.3)
+                format_.first_line_indent = Cm(-0.3)
+                format_.space_before = Pt(1)
+                paragraphe.add_run("• ")
+            for morceau, gras in bloc.morceaux:
+                passage = paragraphe.add_run(morceau)
+                passage.bold = gras or None
+                if bloc.genre == "titre":
+                    passage.italic = True
+        if fond:
+            _ombrer(cellule, fond)
+
     def _cellule(self, cellule, texte: str, style: str, italique: bool,
                  centree: bool, gras: bool = False,
                  fond: str | None = None) -> None:
+        if isinstance(texte, list):
+            self._cellule_blocs(cellule, texte, style, fond)
+            return
         paragraphe = cellule.paragraphs[0]
         self._style(paragraphe, style)
         if centree:

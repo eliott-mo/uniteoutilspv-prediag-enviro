@@ -721,6 +721,81 @@ def nom_scientifique_court(cite: str) -> str:
 #: suffisent à dire ce qu'on y trouve sans refaire un pavé.
 MAX_EXEMPLES = 4
 
+#: Espèces nommées par groupe dans les tableaux de zonages du document. Les
+#: extraits gardent la liste entière ; c'est le document qui la resserre — la
+#: liste complète de 38 phanérogames rendait la cellule illisible (novembre
+#: 2026). Un groupe de dix ou moins s'écrit en entier ; au-delà, la coupe se
+#: dit : « et 28 autres ».
+MAX_ESPECES_PAR_GROUPE = 10
+
+# « , dont » : les extraits construits avant le 3 novembre 2026 l'écrivent
+# après un groupe Natura 2000 coupé à huit noms ; la production en a encore.
+_PUCE = re.compile(
+    r"^·\s*(?P<groupe>.+?)\s*\((?P<total>\d+)\)\s*(?:,\s*dont)?\s*:\s*(?P<liste>.*)$")
+_HABITATS = re.compile(
+    r"^(?P<titre>Habitats d'intérêt communautaire)\s*\((?P<total>\d+)\)\s*:\s*(?P<liste>.*)$")
+_SUITE = re.compile(r"^et \d+ autres?$")
+_TITRES = ("Espèces déterminantes", "Autres groupes représentés",
+           "Autres espèces recensées")
+
+
+@dataclass
+class Bloc:
+    """Un paragraphe de cellule : texte courant, titre de section ou puce."""
+    genre: str                          # texte | titre | puce
+    morceaux: list[tuple[str, bool]]    # (texte, gras)
+
+
+def _resserrer(noms: list[str], total: int, maximum: int) -> str:
+    montres = noms[:maximum]
+    reste = total - len(montres)
+    suite = f", et {reste} autre{'s' if reste > 1 else ''}" if reste > 0 else ""
+    return ", ".join(montres) + suite
+
+
+def blocs_interet(texte: str, maximum: int = MAX_ESPECES_PAR_GROUPE,
+                  ordre: Callable[[str], tuple] | None = None,
+                  observee: Callable[[str], bool] | None = None) -> list[Bloc]:
+    """La description d'un zonage, découpée en paragraphes pour le document.
+
+    Elle arrive des extraits en lignes : un préambule, des titres de section
+    (« Espèces déterminantes »), et des lignes « · Groupe (n) : a, b, c ». Le
+    document en fait un paragraphe par ligne — un seul paragraphe coupé de
+    sauts de ligne étirait en justifié chaque ligne courte sur toute la
+    largeur —, une puce par groupe au nom en gras, et au plus `maximum` noms
+    par groupe. Le total entre parenthèses reste celui de la liste complète.
+
+    `ordre` choisit les noms montrés quand il faut couper — le prédiagnostic
+    met d'abord ceux observés sur la commune, puis les plus forts enjeux —, et
+    `observee` les marque d'un astérisque, que la légende du tableau explique.
+    Les habitats gardent leur ordre et ne sont pas marqués.
+    """
+    blocs = []
+    for ligne in (texte or "").split("\n"):
+        ligne = ligne.strip()
+        if not ligne:
+            continue
+        m = _PUCE.match(ligne) or _HABITATS.match(ligne)
+        if m:
+            habitats = m.re is _HABITATS
+            noms = [n.strip() for n in m["liste"].split("·" if habitats else ",")
+                    if n.strip()]
+            noms = [n for n in noms if not _SUITE.match(n)]
+            if not habitats:
+                if ordre is not None:
+                    noms = sorted(noms, key=ordre)
+                if observee is not None:
+                    noms = [n + "*" if observee(n) else n for n in noms]
+            total = int(m["total"])
+            titre = m["titre"] if m.re is _HABITATS else m["groupe"]
+            blocs.append(Bloc("puce", [
+                (titre, True),
+                (f" ({total}) : " + _resserrer(noms, total, maximum), False)]))
+            continue
+        genre = "titre" if ligne.startswith(_TITRES) else "texte"
+        blocs.append(Bloc(genre, [(ligne, False)]))
+    return blocs
+
 #: cd_ref -> nom français, lu une seule fois. Construit paresseusement : la
 #: plupart des usages de ce module n'en ont pas besoin.
 _NOMS_FR: dict[str, str] | None = None
@@ -920,11 +995,6 @@ _GROUPES_FSD = {
     "FU": "Champignons", "L": "Lichens",
 }
 
-#: Au-dela, on donne le compte et un echantillon plutot que la liste entiere.
-#: C'est la forme qu'emploie le prediagnostic de reference : « la presence de
-#: 37 especes d'oiseaux inscrites a l'Annexe I ... dont : ... ».
-MAX_ESPECES_N2000 = 8
-
 #: cd_ref inscrits a l'annexe II de la directive Habitats, lus une fois.
 _ANNEXE_II: set[str] | None = None
 
@@ -1075,11 +1145,19 @@ def _enrichir_natura(gdf, chemin: Path):
             habitats[site].add(libelle + (" (prioritaire)" if prioritaire else ""))
 
     def _enumere(noms: set) -> tuple[str, int]:
-        """Les noms, triés, échantillonnés s'ils sont trop nombreux."""
+        """Les noms, triés, au complet.
+
+        L'extrait garde la liste entière, comme pour les ZNIEFF : c'est le
+        document qui la resserre, en choisissant quels noms montrer
+        (`blocs_interet`). Jusqu'au 3 novembre 2026, la coupe se faisait ici,
+        à huit noms dans l'ordre alphabétique. La ZPS de Camargue, 89 oiseaux
+        inscrits à l'annexe I, n'en gardait que huit, tous en A — de l'Aigle
+        botté à l'Alouette lulu —, et le document ne pouvait plus faire
+        remonter une espèce observée sur la commune ou de fort enjeu : elle
+        n'était pas dans l'extrait. 28 078 noms manquaient ainsi.
+        """
         ranges = sorted(noms, key=cle_alphabetique)
-        if len(ranges) <= MAX_ESPECES_N2000:
-            return ", ".join(ranges), len(ranges)
-        return ", ".join(ranges[:MAX_ESPECES_N2000]), len(ranges)
+        return ", ".join(ranges), len(ranges)
 
     def _code(cd_sig: str) -> str:
         # cd_sig vaut « I098FR5312003 » : le code du site en est la fin.
@@ -1114,10 +1192,7 @@ def _enrichir_natura(gdf, chemin: Path):
             for groupe, noms in sorted(inscrites.items(),
                                        key=lambda x: -len(x[1])):
                 liste, combien = _enumere(noms)
-                # « dont : » quand la liste est échantillonnée, c'est le mot
-                # qu'emploie le prédiagnostic de référence.
-                jonction = ", dont :" if combien > MAX_ESPECES_N2000 else " :"
-                lignes.append(f"· {groupe} ({combien}){jonction} {liste}")
+                lignes.append(f"· {groupe} ({combien}) : {liste}")
             bouts.append(
                 f"La création de cette {sigle} a été motivée par la présence "
                 f"de {total} espèce{'s' if total > 1 else ''} inscrite"
@@ -1132,10 +1207,7 @@ def _enrichir_natura(gdf, chemin: Path):
             lignes = []
             for groupe, noms in sorted(autres.items(), key=lambda x: -len(x[1])):
                 liste, combien = _enumere(noms)
-                # « dont : » quand la liste est échantillonnée, c'est le mot
-                # qu'emploie le prédiagnostic de référence.
-                jonction = ", dont :" if combien > MAX_ESPECES_N2000 else " :"
-                lignes.append(f"· {groupe} ({combien}){jonction} {liste}")
+                lignes.append(f"· {groupe} ({combien}) : {liste}")
             bouts.append(f"Autres espèces recensées, non inscrites à "
                          f"l'Annexe {annexe}\n" + "\n".join(lignes))
 

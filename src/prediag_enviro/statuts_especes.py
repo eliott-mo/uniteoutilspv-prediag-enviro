@@ -432,6 +432,37 @@ def ligne(jeu_groupe: Jeu, statuts: bdc.Statuts, cd_ref: str, nom_commun: str,
     return valeurs
 
 
+#: Gravité d'une catégorie de liste rouge, pour classer les espèces entre elles.
+_GRAVITE = {"RE": 6, "CR": 5, "CR*": 5, "EN": 4, "VU": 3, "NT": 2}
+
+
+def niveau_enjeu(statuts: bdc.Statuts, cd_ref: str, regions) -> int:
+    """La gravité du statut le plus fort d'une espèce, de 0 à 6.
+
+    Sert à ordonner les espèces qu'un zonage cite, pas à décider d'un enjeu :
+    une catégorie de liste rouge — européenne, nationale ou de la région du
+    projet — compte pour sa gravité, l'annexe I de la directive Oiseaux ou
+    l'annexe II ou IV de la directive Habitats comme un VU, et la protection
+    seule pour 1, sous tout le reste.
+    """
+    niveau = 0
+    for type_statut, territoires in (("LRE", ("Europe",)),
+                                     ("LRN", ("France métropolitaine",)),
+                                     ("LRR", tuple(regions))):
+        for territoire in territoires:
+            for entree in statuts.entrees(cd_ref, type_statut, territoire):
+                niveau = max(niveau, _GRAVITE.get(entree.code, 0))
+    for entree in statuts.entrees(cd_ref, "DH", "France métropolitaine"):
+        if entree.rendu in ("Annexe II", "Annexe IV"):
+            niveau = max(niveau, _GRAVITE["VU"])
+    for entree in statuts.entrees(cd_ref, "DO", "France métropolitaine"):
+        if entree.rendu == "Annexe I":
+            niveau = max(niveau, _GRAVITE["VU"])
+    if not niveau and statuts.entrees(cd_ref, "PN", "France métropolitaine"):
+        niveau = 1
+    return niveau
+
+
 def a_enjeu(jeu_groupe: Jeu, statuts: bdc.Statuts, cd_ref: str) -> bool:
     """L'espèce porte-t-elle un enjeu réglementaire ou patrimonial ?
 
@@ -440,7 +471,8 @@ def a_enjeu(jeu_groupe: Jeu, statuts: bdc.Statuts, cd_ref: str) -> bool:
     dont 6 espèces à enjeu ». La règle retenue, qui est écrite dans le
     document produit pour qu'elle puisse être contestée :
 
-    * protégée, au niveau national, régional ou départemental ;
+    * protégée, au niveau national, régional ou départemental — sauf chez
+      les oiseaux ;
     * inscrite à l'annexe II ou IV de la directive Habitats, ou à l'annexe I
       de la directive Oiseaux ;
     * classée NT, VU, EN, CR, RE ou EX sur une liste rouge ;
@@ -448,8 +480,17 @@ def a_enjeu(jeu_groupe: Jeu, statuts: bdc.Statuts, cd_ref: str) -> bool:
 
     `DD` et `LC` n'en font pas partie, ni les `NA` : une espèce non applicable
     sur une liste rouge n'est pas pour autant un enjeu.
+
+    **Chez les oiseaux, la protection ne distingue rien** : presque tous sont
+    protégés. Elle faisait passer 160 des 186 oiseaux de Bédarieux pour « à
+    enjeu », et l'état initial en devenait la liste exhaustive. Le
+    prédiagnostic de référence n'en tabule que 41 sur 88 à
+    Saint-Pierre-lès-Elbeuf, autant que l'annexe I et les listes rouges en
+    désignent. Les mammifères, chiroptères, amphibiens et reptiles gardent le
+    critère : la référence montre leurs espèces protégées.
     """
-    for type_statut in ("PN", "PR"):
+    protection = jeu_groupe.groupe.forme != "avifaune"
+    for type_statut in (("PN", "PR") if protection else ()):
         territoire = next((l.territoire for l in jeu_groupe.lectures.values()
                            if l.type_statut == type_statut and l.territoire),
                           None)

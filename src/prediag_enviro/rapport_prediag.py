@@ -216,7 +216,49 @@ def _citer(zonages_cites: list) -> str:
 MAX_PAR_TYPE = 15
 
 
-def _groupes_tableau(retenus: list) -> list[tuple[str, list[dict]]]:
+#: Ce que l'astérisque veut dire dans les tableaux de zonages.
+MARQUE_OBSERVEE = "* : espèce observée sur la commune"
+
+
+def _presentation_especes(projet: Projet, resultat_especes, contexte):
+    """Comment ordonner et marquer les espèces qu'un zonage cite.
+
+    Quand un groupe en compte trop pour toutes les nommer, on montre d'abord
+    celles observées sur la commune — c'est ce qui relie le zonage au projet
+    —, puis celles au plus fort enjeu, puis l'ordre alphabétique. Rend
+    (ordre, observee), ou (None, None) sans référentiels.
+    """
+    if contexte is None:
+        return None, None
+    index = contexte.index
+    statuts = contexte.statuts_pour(projet.departements)
+    regions = sorted({r for d in projet.departements
+                      for r in se.REGIONS.get(str(d).strip().upper(), ())})
+    observees = ({e.cd_ref for e in resultat_especes.especes if e.cd_ref}
+                 if resultat_especes is not None else set())
+    cd_refs: dict[str, str | None] = {}
+    niveaux: dict[str, int] = {}
+
+    def cd_ref(nom: str) -> str | None:
+        if nom not in cd_refs:
+            cd_refs[nom] = index.cd_ref_exact(nom)
+        return cd_refs[nom]
+
+    def observee(nom: str) -> bool:
+        cd = cd_ref(nom)
+        return cd is not None and cd in observees
+
+    def ordre(nom: str) -> tuple:
+        cd = cd_ref(nom)
+        if cd is not None and cd not in niveaux:
+            niveaux[cd] = se.niveau_enjeu(statuts, cd, regions)
+        return (not observee(nom), -niveaux.get(cd, 0), cle_alphabetique(nom))
+
+    return ordre, observee
+
+
+def _groupes_tableau(retenus: list, ordre=None,
+                     observee=None) -> list[tuple[str, list[dict]]]:
     """Lignes du tableau, groupées par type sous une ligne fusionnée.
 
     C'est la forme du document de référence : « Zone Naturelle d'Intérêt
@@ -234,7 +276,8 @@ def _groupes_tableau(retenus: list) -> list[tuple[str, list[dict]]]:
             "nom": zonage.nom,
             "distance": zonage.distance_lisible,
             "identifiant": zonage.identifiant,
-            "interet": zonage.interet,
+            "interet": mod_zonages.blocs_interet(zonage.interet, ordre=ordre,
+                                                 observee=observee),
             "aires": ", ".join(zonage.aires),
         })
     for type_zonage, lignes in par_type.items():
@@ -610,6 +653,7 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
             "(section « Zonages » de l'outil) puis régénérer ce document"
         )
     else:
+        ordre, observee = _presentation_especes(projet, resultat_especes, contexte)
         for famille, titre_interne in mod_zonages.FAMILLES:
             retenus = resultat_zonages.par_famille(famille)
             rapport.sous_sous_partie(TITRES_ZONAGES.get(famille, titre_interne))
@@ -623,12 +667,22 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
                     rapport.para(mention)
             if not retenus:
                 continue
+            groupes = _groupes_tableau(retenus, ordre, observee)
+            # L'astérisque ne s'explique que dans les tableaux qui en portent.
+            marque = any(morceau.endswith("*") or "*," in morceau
+                         for _, lignes in groupes for ligne in lignes
+                         if isinstance(ligne.get("interet"), list)
+                         for bloc in ligne["interet"] for morceau, _ in bloc.morceaux)
+            legende_bas = _legende_aires(projet)
+            if marque:
+                legende_bas = (f"{legende_bas} · {MARQUE_OBSERVEE}" if legende_bas
+                               else f"Légende : {MARQUE_OBSERVEE}")
             rapport.tableau(
                 colonnes_zonages(), [],
                 legende=f"{TITRES_ZONAGES.get(famille, titre_interne)} dans "
                         "les aires d'étude du projet",
-                groupes=_groupes_tableau(retenus),
-                legende_bas=_legende_aires(projet),
+                groupes=groupes,
+                legende_bas=legende_bas,
             )
             carte = cartes_par_famille.get(famille)
             if carte is not None:
@@ -693,7 +747,8 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
         "relèvent de sources régionales, à brancher au cas par cas."
     )
 
-    comptes = _compter_par_famille_etude(resultat_especes, contexte)
+    comptes = _compter_par_famille_etude(resultat_especes, contexte,
+                                         projet.departements)
     par_groupe, ecartes = _ecarter(
         _especes_par_groupe(resultat_especes, contexte))
     phrase_ecartees = _phrase_ecartees(ecartes)
@@ -779,8 +834,14 @@ def _rayon_aer(projet: Projet) -> str:
     return f"{aire.rayon_m / 1000:.0f} km".replace(".", ",")
 
 
-def _compter_par_famille_etude(resultat, contexte) -> dict[str, tuple[int, int]]:
-    """(total, à enjeu) par volet de l'état initial."""
+def _compter_par_famille_etude(resultat, contexte,
+                               departements: list[str]) -> dict[str, tuple[int, int]]:
+    """(total, à enjeu) par volet de l'état initial.
+
+    Avec les mêmes statuts et les mêmes départements que les tableaux : le
+    décompte ignorait la liste rouge régionale, que les tableaux lisent, et
+    pouvait annoncer un autre nombre que les lignes tabulées dessous.
+    """
     if resultat is None or not resultat.especes or contexte is None:
         return {}
     # Le même regroupement que les tableaux, et les mêmes écartés : un total
@@ -788,13 +849,14 @@ def _compter_par_famille_etude(resultat, contexte) -> dict[str, tuple[int, int]]
     # pire que pas de total du tout.
     par_groupe, _ = _ecarter(_especes_par_groupe(resultat, contexte))
 
+    statuts = contexte.statuts_pour(departements)
     comptes: dict[str, list[int]] = {}
     for cle_groupe, especes in par_groupe.items():
         groupe = se.groupe_par_cle(cle_groupe)
-        jeu = se.jeu(groupe, contexte.source_statuts,
-                     [e.cd_ref for e in especes], [])
-        enjeu = sum(1 for e in especes
-                    if se.a_enjeu(jeu, contexte.source_statuts, e.cd_ref))
+        # Les départements donnent la région de la liste rouge : sans eux,
+        # `jeu.region` restait vide et la liste régionale ne comptait pas.
+        jeu = se.jeu(groupe, statuts, [e.cd_ref for e in especes], departements)
+        enjeu = sum(1 for e in especes if se.a_enjeu(jeu, statuts, e.cd_ref))
         famille = se.famille_etude(cle_groupe)
         cumul = comptes.setdefault(famille, [0, 0])
         cumul[0] += len(especes)
@@ -854,7 +916,8 @@ def _annexes(rapport: Rapport, projet: Projet, resultat, contexte) -> list[str]:
         "initial — lorsqu'elle est protégée, inscrite aux annexes de la "
         "directive Habitats ou Oiseaux, classée NT, VU, EN, CR, RE ou EX sur "
         "une liste rouge, ou concernée par un plan national d'actions. Les "
-        "catégories LC, DD, NA et NE n'y suffisent pas."
+        "catégories LC, DD, NA et NE n'y suffisent pas. Chez les oiseaux, "
+        "presque tous protégés, la protection seule n'en fait pas un enjeu."
     )
 
     # L'annexe « fait foi sur ce qui a été consulté » : elle doit donc dire
