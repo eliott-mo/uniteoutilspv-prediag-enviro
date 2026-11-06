@@ -594,6 +594,16 @@ def _absence_de_reference(contexte, jeu, retenues: list, statuts=None) -> str:
 MAX_CONDITION_ZNIEFF = 40
 _CONDITION = re.compile(r"^Oui \((?P<condition>.+)\)$", re.S)
 
+#: Sous un tableau dont une condition finit par « … » : l'outil marque ainsi,
+#: depuis le 6 novembre 2026, les remarques que BDC coupe (voir
+#: `determinantes.COUPURE_BDC`) — 29 oiseaux d'Auvergne-Rhône-Alpes.
+NOTE_COUPURE = ("« … » marque une condition que BDC-Statuts coupe à 255 caractères ; "
+                "la suite ne se trouve que dans la liste d'origine.")
+#: La marque de l'outil : « … », puis seulement des parenthèses qui se
+#: referment, jusqu'à la fin de la case ou d'une réserve. Deux remarques du
+#: Centre portent un « … » à elles — « bord de route…). » — : pas de note.
+_COUPURE = re.compile(r"…(?=\)*(?:$|[ ;,]))")
+
 
 def _equilibree(texte: str) -> bool:
     profondeur = 0
@@ -616,10 +626,12 @@ def _sortir_conditions(lignes: list[dict]) -> list[str]:
             continue
         m = _CONDITION.match(valeur)
         # On ne retire « Oui ( … ) » que d'une parenthèse qui se referme bien.
-        # Deux colonnes peuvent répondre — « Oui (…), Oui (…) » —, et des
-        # cellules en ouvrent plus qu'elles n'en ferment : 89 des 187
-        # conditions d'Auvergne-Rhône-Alpes chez les oiseaux. Retirer la
-        # dernière parenthèse ôterait alors celle d'une précision.
+        # Deux colonnes peuvent répondre — « Oui (…), Oui (…) » —, et une
+        # cellule peut en ouvrir plus qu'elle n'en ferme : ainsi, jusqu'au
+        # 6 novembre 2026, de 89 des 187 conditions d'Auvergne-Rhône-Alpes
+        # chez les oiseaux, et encore de textes de listes qu'on reprend tels
+        # quels. Retirer la dernière parenthèse ôterait alors celle d'une
+        # précision.
         condition = (m["condition"] if m and valeur.count("Oui (") == 1
                      and _equilibree(m["condition"]) else valeur)
         ligne["zdet"] = "Oui (sous conditions)"
@@ -662,6 +674,7 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
             reproduction=getattr(espece, "nidification", ""),
         ))
     qualificatif = " à enjeu" if seulement_enjeu else ""
+    coupee = any(_COUPURE.search(ligne.get("zdet") or "") for ligne in lignes)
     conditions = _sortir_conditions(lignes)
     rapport.tableau(
         jeu.colonnes, lignes,
@@ -675,6 +688,8 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
         rapport.para(f"Conditions de déterminance ZNIEFF{territoire}, trop "
                      "longues pour figurer dans le tableau :")
         rapport.puces(conditions)
+    if coupee:
+        rapport.note(NOTE_COUPURE)
     avertissement = _absence_de_reference(contexte, jeu, retenues, statuts)
     if avertissement:
         rapport.para(avertissement)

@@ -39,6 +39,12 @@ function Ecrire($cellule, $m) {
         throw ("écriture de " + $cellule.Address(0, 0) + " (" + $cellule.Worksheet.Name + ") : " + $_.Exception.Message)
     }
 }
+# Une même instruction « .Value2 = $v » se fige sur le type de la première
+# valeur qu'elle reçoit : PowerShell refuse ensuite une valeur d'un autre type
+# (« Impossible d'effectuer un cast d'un objet de type 'System.Double' en type
+# 'System.String' »). Le suivi d'une seule ligne, date puis textes, échouait
+# ainsi le 6 novembre 2026. Chaque type a donc son affectation : celles d'Ecrire.
+function Poser($cellule, $v) { Ecrire $cellule ([pscustomobject]@{ valeur = $v }) }
 
 $xl = New-Object -ComObject Excel.Application
 $xl.Visible = $false; $xl.DisplayAlerts = $false; $xl.ScreenUpdating = $false
@@ -99,7 +105,7 @@ try {
                 if ($t.titre) { (Cellule $ws ($t.ligne - 1) $t.colonne).Value2 = [string]$t.titre }
                 for ($i = 0; $i -lt $t.valeurs.Count; $i++) {
                     for ($j = 0; $j -lt $t.valeurs[$i].Count; $j++) {
-                        (Cellule $ws ($t.ligne + $i) ($t.colonne + $j)).Value2 = $t.valeurs[$i][$j]
+                        Poser (Cellule $ws ($t.ligne + $i) ($t.colonne + $j)) $t.valeurs[$i][$j]
                     }
                 }
             }
@@ -147,7 +153,7 @@ try {
                         if ($j -eq ([int]$aj.colonne_date - 1) -and $v) {
                             $v = ([datetime]::ParseExact([string]$v, 'yyyy-MM-dd', $null)).ToOADate()
                         }
-                        (Cellule $ws $r ($j + 1)).Value2 = $v
+                        Poser (Cellule $ws $r ($j + 1)) $v
                     }
                 }
             }

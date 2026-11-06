@@ -29,7 +29,10 @@ perte :
   mammifères emploie déjà ;
 * le vecteur par zone d'Auvergne-Rhône-Alpes — « Alpine : Déterminante ;
   Méditerranéenne : Non déterminante ; … » —, dont on garde les zones où
-  l'espèce compte.
+  l'espèce compte, regroupées par condition.
+
+Une remarque que BDC a coupée à 255 caractères finit par « … » (voir
+`COUPURE_BDC`) : la reprendre telle quelle la donnerait pour entière.
 
 **Toutes les listes ne sont pas dans BDC.** La v18 cite la liste des oiseaux
 nicheurs de Nouvelle-Aquitaine (2023) mais n'en porte aucun oiseau. L'export
@@ -103,37 +106,104 @@ def _zones_aura(cle: str) -> list[str] | None:
     return zones
 
 
-def _etat_aura(etat: str) -> tuple[bool, str]:
-    """L'espèce compte-t-elle dans cette zone, et sous quelle précision ?
+def _debut_de_zone(cle: str) -> bool:
+    """Le texte est-il le début d'un nom de zone, coupé par BDC — « Alpin », « Méd » ?"""
+    bas = " ".join(cle.lower().replace("–", "-").split())
+    formes = [motif for motif, _ in ZONES_AURA]
+    formes += [f"continentale - {motif}" for motif in formes]
+    return bool(bas) and any(forme.startswith(bas) for forme in formes)
 
-    BDC tronque parfois l'état — « Déte », « Déter » — : c'est encore un oui.
+
+def _couper(texte: str) -> str:
+    """Marque la fin d'un texte coupé, et referme ses parenthèses.
+
+    « (si dortoi » → « (si dortoi…) ».
     """
-    etat = etat.strip()
+    texte = texte.rstrip()
+    return f"{texte}…" + ")" * max(0, texte.count("(") - texte.count(")"))
+
+
+def _sans_parentheses(texte: str) -> str:
+    """Le texte sans la parenthèse qui l'enveloppe tout entier.
+
+    « (seulement les gîtes) » → « seulement les gîtes » ; « (a) et (b) » reste.
+    """
+    if not (texte.startswith("(") and texte.endswith(")")):
+        return texte
+    profondeur = 0
+    for signe in texte[1:-1]:
+        profondeur += (signe == "(") - (signe == ")")
+        if profondeur < 0:
+            return texte
+    return texte[1:-1].strip() if profondeur == 0 else texte
+
+
+def _etat_aura(etat: str, coupe: bool = False) -> tuple[bool, str]:
+    """L'espèce compte-t-elle dans cette zone, et sous quelle condition ?
+
+    La liste écrit ses rubriques derrière des tirets : « Déterminante : -
+    nicheur (si sites de reproduction) - hivernant » rend « nicheur (si sites
+    de reproduction), hivernant ». « Déterminante (seulement les gîtes) » rend
+    « seulement les gîtes ». Jusqu'au 6 novembre 2026, la condition gardait
+    son deux-points et son tiret, et perdait sa parenthèse fermante : « : -
+    nicheur (si sites de reproduction ».
+
+    BDC coupe parfois l'état (`coupe`) — « Déte », « Déterminante : -
+    hivernant (si dortoi » — : c'est encore un oui, dont la condition finit
+    par « … ».
+    """
+    etat = " ".join(etat.split())
     if etat.lower().startswith("non"):
         return False, ""
-    precision = re.sub(r"(?i)^d[ée]term\w*", "", etat).strip(" ()")
-    return True, precision
+    mot = re.match(r"(?i)d[ée]t\w*", etat)
+    if mot and "determinante".startswith(mot.group().lower().replace("é", "e")):
+        etat = etat[mot.end():]
+    precision = etat.strip().removeprefix(":").strip()
+    if coupe:
+        precision = _couper(precision)
+    if precision.startswith("-"):
+        rubriques = re.split(r"(?:^|\s)-\s", precision)
+        return True, ", ".join(r.strip() for r in rubriques if r.strip())
+    return True, _sans_parentheses(precision)
 
 
-def _vecteur_aura(texte: str) -> str | None | bool:
-    """Condense un vecteur par zone ; `False` si le texte n'en est pas un."""
+def _vecteur_aura(texte: str, coupee: bool = False) -> str | None | bool:
+    """Condense un vecteur par zone ; `False` si le texte n'en est pas un.
+
+    Les zones de même condition sont regroupées — « Massif central, Alpin :
+    nicheur » —, et la condition reste seule quand elle vaut pour les quatre.
+
+    Un vecteur que BDC a coupé (`coupee`) finit par « … », là où tombe la
+    coupure : dans la condition d'une zone, ou après la dernière zone lue,
+    quand c'est le nom de la suivante que la coupure a tranché.
+    """
+    fin_coupee = coupee and not texte.rstrip().endswith(";")
+    suite_perdue = coupee and not fin_coupee
+    morceaux = [m for m in texte.split(";") if m.strip()]
     paires = []
-    for morceau in (m for m in texte.split(";") if m.strip()):
+    for rang, morceau in enumerate(morceaux, 1):
+        derniere = fin_coupee and rang == len(morceaux)
         cle, sep, etat = morceau.partition(":")
+        if derniere and not sep and paires and _debut_de_zone(cle):
+            suite_perdue = True
+            break
         zones = _zones_aura(cle) if sep else None
         if zones is None:
             return False
-        oui, precision = _etat_aura(etat)
+        oui, precision = _etat_aura(etat, coupe=derniere)
         paires.extend((zone, oui, precision) for zone in zones)
     retenues = [(zone, precision) for zone, oui, precision in paires if oui]
     if not retenues:
-        return None
-    if (len({z for z, _ in retenues}) == len(ZONES_AURA)
-            and not any(p for _, p in retenues)):
-        return ""
-    if any(p for _, p in retenues):
-        return " ; ".join(f"{z} : {p}" if p else z for z, p in retenues)
-    return ", ".join(z for z, _ in retenues)
+        return "…" if coupee else None
+    groupes: dict[str, list[str]] = {}
+    for zone, precision in retenues:
+        groupes.setdefault(precision, []).append(zone)
+    if (not coupee and len(groupes) == 1
+            and len({z for z, _ in retenues}) == len(ZONES_AURA)):
+        return next(iter(groupes))
+    rendus = [", ".join(zones) + (f" : {precision}" if precision else "")
+              for precision, zones in groupes.items()]
+    return " ; ".join(rendus + (["…"] if suite_perdue else []))
 
 
 def _domaines_occitanie(texte: str) -> str | None:
@@ -150,20 +220,22 @@ def _domaines_occitanie(texte: str) -> str | None:
     return ", ".join(codes) if codes and not reste else None
 
 
-def condition(brut) -> str | None:
+def condition(brut, coupee: bool = False) -> str | None:
     """La réserve, ramenée à ce qu'elle restreint.
 
     Rend "" pour une détermination sans réserve, et `None` quand la ligne ne
     détermine rien : le vecteur d'Auvergne-Rhône-Alpes déclare parfois toutes
-    ses zones « Non déterminante ».
+    ses zones « Non déterminante ». Une remarque coupée (`coupee`, voir
+    `COUPURE_BDC`) finit par « … ».
     """
     texte = _texte(brut)
     if not texte:
         return ""
-    vecteur = _vecteur_aura(texte)
+    vecteur = _vecteur_aura(texte, coupee)
     if vecteur is not False:
         return vecteur
-    return _domaines_occitanie(texte) or texte
+    reserve = _domaines_occitanie(texte) or texte
+    return _couper(reserve) if coupee else reserve
 
 
 def departement_bdc(cd_sig: str) -> str:
@@ -283,8 +355,35 @@ def _territoire_du_document(departements: Counter) -> tuple[str, set[str]]:
     return (anciennes.pop() if len(anciennes) == 1 else region), retenus
 
 
-def depuis_bdc(archive: Path) -> Listes:
-    """Lit les lignes `ZDET` de l'archive BDC-Statuts, métropole seulement."""
+#: BDC-Statuts coupe certaines remarques à 255 caractères : 385 lignes
+#: déterminantes en ont exactement 255, aucune de 256 à 261. La coupure vient
+#: de l'import de six listes, dont celle d'Auvergne-Rhône-Alpes (348 lignes) ;
+#: d'autres listes portent des remarques plus longues. Le texte perdu ne se
+#: retrouve que dans la liste d'origine.
+COUPURE_BDC = 255
+
+
+def _coupee(remarque: str) -> bool:
+    """BDC a-t-il coupé cette remarque ?
+
+    À 255 caractères ; ou à 254, quand la coupure est tombée sur un espace
+    que l'export a retiré — une parenthèse restée ouverte le dit alors :
+    « … - hivernant (si ». Trois remarques de la liste d'Auvergne-Rhône-Alpes
+    sont dans ce cas ; une quatrième de 254 caractères est entière.
+    """
+    n = len(remarque)
+    return n == COUPURE_BDC or (n == COUPURE_BDC - 1
+                                and remarque.count("(") > remarque.count(")"))
+
+
+def depuis_bdc(archive: Path, condenser=None) -> Listes:
+    """Lit les lignes `ZDET` de l'archive BDC-Statuts, métropole seulement.
+
+    `condenser` ramène chaque remarque à sa réserve : `condition` par défaut.
+    `outils/corriger_conditions.py` y passe celle du 1er novembre 2026, pour
+    reconnaître les cases qu'elle a écrites.
+    """
+    condenser = condenser or condition
     listes = Listes()
     lignes_departementales = []
     par_document: dict[str, Counter] = {}
@@ -302,7 +401,8 @@ def depuis_bdc(archive: Path) -> Listes:
             cd_ref = (ligne.get("CD_REF") or "").strip()
             niveau = (ligne.get("NIVEAU_ADMIN") or "").strip()
             document = (ligne.get("CD_DOC") or "").strip()
-            reserve = condition(ligne.get("RQ_STATUT"))
+            remarque = ligne.get("RQ_STATUT") or ""
+            reserve = condenser(remarque, coupee=_coupee(remarque))
             if reserve is None:
                 listes.ecartees["aucune zone déterminante"] += 1
                 continue
@@ -408,8 +508,10 @@ def ajouter_export_inpn(listes: Listes, chemin: Path, territoire: str,
 
 #: Version du format du cache. À incrémenter dès que ce qu'il garde change :
 #: il est validé par la version de BDC, qui ne bouge pas quand c'est notre
-#: code qui change — même garde-fou que `bdc.FORMAT`.
-FORMAT = 1
+#: code qui change — même garde-fou que `bdc.FORMAT`. 2 : la condensation
+#: d'Auvergne-Rhône-Alpes corrigée, et les remarques coupées marquées
+#: (6 novembre 2026).
+FORMAT = 2
 
 
 def charger(archive: Path, version: str, cache: Path | None = None) -> Listes:
