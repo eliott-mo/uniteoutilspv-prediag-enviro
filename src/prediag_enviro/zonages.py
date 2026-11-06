@@ -724,9 +724,15 @@ MAX_EXEMPLES = 4
 #: Espèces nommées par groupe dans les tableaux de zonages du document. Les
 #: extraits gardent la liste entière ; c'est le document qui la resserre — la
 #: liste complète de 38 phanérogames rendait la cellule illisible (novembre
-#: 2026). Un groupe de dix ou moins s'écrit en entier ; au-delà, la coupe se
-#: dit : « et 28 autres ».
-MAX_ESPECES_PAR_GROUPE = 10
+#: 2026). Cinq depuis le 6 novembre 2026, sur décision d'Eliott, au lieu de
+#: dix. Un groupe de cinq ou moins s'écrit en entier ; au-delà, la coupe se
+#: dit : « et 33 autres ».
+MAX_ESPECES_PAR_GROUPE = 5
+
+#: Habitats nommés par site. La coupe à cinq ne vaut que pour les espèces :
+#: les habitats n'ont pas de niveau d'enjeu qui dise lesquels montrer, et
+#: gardent l'ordre de l'extrait.
+MAX_HABITATS = 10
 
 # « , dont » : les extraits construits avant le 3 novembre 2026 l'écrivent
 # après un groupe Natura 2000 coupé à huit noms ; la production en a encore.
@@ -766,9 +772,10 @@ def blocs_interet(texte: str, maximum: int = MAX_ESPECES_PAR_GROUPE,
     par groupe. Le total entre parenthèses reste celui de la liste complète.
 
     `ordre` choisit les noms montrés quand il faut couper — le prédiagnostic
-    met d'abord ceux observés sur la commune, puis les plus forts enjeux —, et
+    met d'abord les plus forts enjeux, puis ceux observés sur la commune —, et
     `observee` les marque d'un astérisque, que la légende du tableau explique.
-    Les habitats gardent leur ordre et ne sont pas marqués.
+    Les habitats gardent leur ordre, ne sont pas marqués, et se coupent à
+    `MAX_HABITATS`.
     """
     blocs = []
     for ligne in (texte or "").split("\n"):
@@ -790,7 +797,8 @@ def blocs_interet(texte: str, maximum: int = MAX_ESPECES_PAR_GROUPE,
             titre = m["titre"] if m.re is _HABITATS else m["groupe"]
             blocs.append(Bloc("puce", [
                 (titre, True),
-                (f" ({total}) : " + _resserrer(noms, total, maximum), False)]))
+                (f" ({total}) : " + _resserrer(
+                    noms, total, MAX_HABITATS if habitats else maximum), False)]))
             continue
         genre = "titre" if ligne.startswith(_TITRES) else "texte"
         blocs.append(Bloc(genre, [(ligne, False)]))

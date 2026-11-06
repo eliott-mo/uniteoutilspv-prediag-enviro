@@ -57,7 +57,12 @@ def normaliser_code(valeur: str, type_statut: str) -> str | None:
         return None
 
     if type_statut == "ZDET":
-        return "true" if v.lower() in _VRAI else "false"
+        # « Oui (MC, SO) » : la parenthèse dit les conditions de la liste, ce
+        # qui la précède dit si l'espèce est déterminante. Jusqu'au 6 novembre
+        # 2026, la cellule entière était comparée à « oui » : quand la veille
+        # se repliait sur l'index de BDC, faute des listes, les 1 976 cellules
+        # DZ à parenthèse des classeurs se lisaient « non ».
+        return "true" if v.split("(", 1)[0].strip().lower() in _VRAI else "false"
 
     if type_statut == "DH":
         majuscule = v.upper().replace(" ", "")

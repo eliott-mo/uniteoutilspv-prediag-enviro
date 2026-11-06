@@ -442,8 +442,13 @@ def niveau_enjeu(statuts: bdc.Statuts, cd_ref: str, regions) -> int:
     Sert à ordonner les espèces qu'un zonage cite, pas à décider d'un enjeu :
     une catégorie de liste rouge — européenne, nationale ou de la région du
     projet — compte pour sa gravité, l'annexe I de la directive Oiseaux ou
-    l'annexe II ou IV de la directive Habitats comme un VU, et la protection
-    seule pour 1, sous tout le reste.
+    l'annexe II ou IV de la directive Habitats comme un VU, et pour 1, sous
+    tout le reste, la protection nationale ou régionale ou un plan national
+    d'actions. Ce sont les critères d'`a_enjeu` : une espèce qu'il retient ne
+    passe jamais derrière une espèce sans statut. Jusqu'au 6 novembre 2026,
+    seule la protection nationale comptait — 30 plantes protégées en
+    Languedoc-Roussillon et 42 espèces à plan d'actions valaient 0 dans les
+    zonages de l'Hérault.
     """
     niveau = 0
     for type_statut, territoires in (("LRE", ("Europe",)),
@@ -458,7 +463,9 @@ def niveau_enjeu(statuts: bdc.Statuts, cd_ref: str, regions) -> int:
     for entree in statuts.entrees(cd_ref, "DO", "France métropolitaine"):
         if entree.rendu == "Annexe I":
             niveau = max(niveau, _GRAVITE["VU"])
-    if not niveau and statuts.entrees(cd_ref, "PN", "France métropolitaine"):
+    if not niveau and (statuts.entrees(cd_ref, "PN", "France métropolitaine")
+                       or any(statuts.entrees(cd_ref, "PR", r) for r in regions)
+                       or statuts.entrees(cd_ref, "PNA", "France")):
         niveau = 1
     return niveau
 

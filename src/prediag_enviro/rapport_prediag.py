@@ -224,9 +224,11 @@ def _presentation_especes(projet: Projet, resultat_especes, contexte):
     """Comment ordonner et marquer les espèces qu'un zonage cite.
 
     Quand un groupe en compte trop pour toutes les nommer, on montre d'abord
-    celles observées sur la commune — c'est ce qui relie le zonage au projet
-    —, puis celles au plus fort enjeu, puis l'ordre alphabétique. Rend
-    (ordre, observee), ou (None, None) sans référentiels.
+    celles au plus fort enjeu, puis, à enjeu égal, celles observées sur la
+    commune — c'est ce qui relie le zonage au projet —, puis l'ordre
+    alphabétique. L'enjeu passe devant depuis le 6 novembre 2026, sur
+    décision d'Eliott, avec la coupe à cinq noms. Rend (ordre, observee), ou
+    (None, None) sans référentiels.
     """
     if contexte is None:
         return None, None
@@ -252,7 +254,7 @@ def _presentation_especes(projet: Projet, resultat_especes, contexte):
         cd = cd_ref(nom)
         if cd is not None and cd not in niveaux:
             niveaux[cd] = se.niveau_enjeu(statuts, cd, regions)
-        return (not observee(nom), -niveaux.get(cd, 0), cle_alphabetique(nom))
+        return (-niveaux.get(cd, 0), not observee(nom), cle_alphabetique(nom))
 
     return ordre, observee
 
@@ -583,6 +585,49 @@ def _absence_de_reference(contexte, jeu, retenues: list, statuts=None) -> str:
     )
 
 
+#: Au-delà, une condition de déterminance ZNIEFF quitte le tableau pour une
+#: liste dessous. La colonne fait 2,3 cm : « Oui (MC, SO) » y tient, mais les
+#: listes donnent jusqu'à 261 caractères pour un oiseau d'Auvergne-Rhône-Alpes
+#: et 334 pour un insecte d'Aquitaine, soit une vingtaine de lignes dans la
+#: cellule. La parenthèse reste la règle des classeurs, décidée par Eliott le
+#: 6 novembre 2026 : c'est au document de choisir ce qu'il imprime.
+MAX_CONDITION_ZNIEFF = 40
+_CONDITION = re.compile(r"^Oui \((?P<condition>.+)\)$", re.S)
+
+
+def _equilibree(texte: str) -> bool:
+    profondeur = 0
+    for signe in texte:
+        profondeur += (signe == "(") - (signe == ")")
+        if profondeur < 0:
+            return False
+    return profondeur == 0
+
+
+def _sortir_conditions(lignes: list[dict]) -> list[str]:
+    """Écrit « Oui (sous conditions) » à la place des conditions trop longues.
+
+    Rend « Espèce : condition » pour chacune, dans l'ordre du tableau.
+    """
+    sorties = []
+    for ligne in lignes:
+        valeur = ligne.get("zdet") or ""
+        if len(valeur) <= MAX_CONDITION_ZNIEFF or not valeur.startswith("Oui ("):
+            continue
+        m = _CONDITION.match(valeur)
+        # On ne retire « Oui ( … ) » que d'une parenthèse qui se referme bien.
+        # Deux colonnes peuvent répondre — « Oui (…), Oui (…) » —, et des
+        # cellules en ouvrent plus qu'elles n'en ferment : 89 des 187
+        # conditions d'Auvergne-Rhône-Alpes chez les oiseaux. Retirer la
+        # dernière parenthèse ôterait alors celle d'une précision.
+        condition = (m["condition"] if m and valeur.count("Oui (") == 1
+                     and _equilibree(m["condition"]) else valeur)
+        ligne["zdet"] = "Oui (sous conditions)"
+        sorties.append(f"{ligne.get('nom_commun') or ligne.get('nom_scientifique')}"
+                       f" : {condition}")
+    return sorties
+
+
 def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
                      groupe, especes: list, seulement_enjeu: bool) -> int:
     """Un tableau d'espèces. Renvoie le nombre de lignes écrites.
@@ -617,12 +662,19 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
             reproduction=getattr(espece, "nidification", ""),
         ))
     qualificatif = " à enjeu" if seulement_enjeu else ""
+    conditions = _sortir_conditions(lignes)
     rapport.tableau(
         jeu.colonnes, lignes,
         legende=f"Liste des espèces {groupe.complement}{qualificatif} "
                 f"recensées sur la commune "
                 f"{complement_de(projet.libelle_communes)}",
     )
+    if conditions:
+        lecture = jeu.lectures.get("zdet")
+        territoire = f" ({lecture.territoire})" if lecture and lecture.territoire else ""
+        rapport.para(f"Conditions de déterminance ZNIEFF{territoire}, trop "
+                     "longues pour figurer dans le tableau :")
+        rapport.puces(conditions)
     avertissement = _absence_de_reference(contexte, jeu, retenues, statuts)
     if avertissement:
         rapport.para(avertissement)
