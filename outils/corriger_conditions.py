@@ -19,10 +19,13 @@ Le 6 novembre 2026, ce script a réécrit 203 cases : les 187 des oiseaux, 12
 chez les mammifères (Auvergne-Rhône-Alpes, Île-de-France, Aquitaine), 4 chez
 les insectes (Corse).
 
-Le 7 novembre 2026, 11 autres chez les insectes : les coléoptères
-saproxyliques d'Auvergne-Rhône-Alpes, dont la liste ne nomme que des zones,
+Le 7 novembre 2026, 19 autres chez les insectes, en Auvergne-Rhône-Alpes.
+Les 11 coléoptères saproxyliques, dont la liste ne nomme que des zones,
 gardaient la forme de BDC — « Oui (Continentale - Massif Central,Alpine,) ».
-Relancé, il n'en trouve plus aucune.
+Puis 8 papillons, dont les zones de deux listes sont désormais réunies —
+« Oui (Alpin ; Méditerranéen) » devient « Oui (Alpin, Méditerranéen) » : la
+première passe ne les avait pas vues (voir `listes`), la veille les a
+relevées. Relancé, il n'en trouve plus aucune.
 
 **Ce que fait ce script.** Il calcule chaque case DZ deux fois : par la
 condensation du 1er novembre, recopiée ici, et par celle d'aujourd'hui. Il ne
@@ -104,14 +107,41 @@ def condition_1er_novembre(brut, coupee: bool = False) -> str | None:
 
 # ---------------------------------------------------------- les corrections
 
+def listes(contexte) -> tuple[determinantes.Listes, determinantes.Listes]:
+    """Les listes condensées comme le 1er novembre 2026, et comme aujourd'hui.
+
+    Les cases du 1er novembre ont été composées sans réunir les zones de deux
+    listes : `avant` s'en passe aussi. Sans quoi « Oui (Alpin ;
+    Méditerranéen) » se recomposerait « Oui (Alpin, Méditerranéen) », égale à
+    la case d'aujourd'hui, et la case passerait pour juste — ce qui est
+    arrivé le 7 novembre, la veille l'a relevé.
+    """
+    archive = chemins.referentiels() / "BDC.zip"
+    avant = determinantes.depuis_bdc(archive, condenser=condition_1er_novembre)
+    avant.reunir_zones = False
+    apres = determinantes.depuis_bdc(archive)
+    if ec.EXPORT_NA.exists():
+        for l in (avant, apres):
+            determinantes.ajouter_export_inpn(l, ec.EXPORT_NA, "Nouvelle-Aquitaine",
+                                              contexte.index, ec.REFERENCE_NA)
+    return avant, apres
+
+
 #: Ce que la condensation laissait tel que BDC-Statuts l'écrit : un vecteur
 #: coupé dans un nom de zone, une liste de zones (« Continentale - Massif
 #: Central,Alpine, »), un domaine d'Occitanie écrit « Determinant ».
 _BRUTE = re.compile(r"Continentale|Alpine|Méditerranéenne|\bDeterminant\b")
 
 
+def _zones_de_plusieurs_listes(valeur: str) -> bool:
+    """« Oui (Alpin ; Méditerranéen) » : plusieurs groupes qui ne nomment que des zones."""
+    groupes = valeur.removeprefix("Oui (").removesuffix(")").split(" ; ")
+    return len(groupes) > 1 and all(
+        set(g.split(", ")) <= set(determinantes._NOMS_AURA) for g in groupes)
+
+
 def _nature(avant: str, apres: str) -> str:
-    """Ce qui clochait : « mal condensée », « brute », « regroupée », ou rien.
+    """Ce qui clochait : « mal condensée », « brute », « réunie », « regroupée », ou rien.
 
     Rien quand seule la coupure de BDC est désormais marquée.
     """
@@ -119,6 +149,8 @@ def _nature(avant: str, apres: str) -> str:
         return "mal condensée"
     if _BRUTE.search(avant):
         return "brute"
+    if _zones_de_plusieurs_listes(avant):
+        return "réunie"
     if apres.rstrip(")").removesuffix("…") != avant.rstrip(")"):
         return "regroupée"
     return ""
@@ -139,6 +171,10 @@ def _raisons(avant: str, apres: str) -> str:
         raisons.append("la condition écrite le 01/11/2026 n'était pas condensée : "
                        "ses zones restaient écrites comme dans BDC-Statuts"
                        + (" ; réunies, les zones des listes couvrent tout le territoire"
+                          if apres == "Oui" else ""))
+    elif nature == "réunie":
+        raisons.append("zones de plusieurs listes réunies"
+                       + (", qui couvrent ensemble tout le territoire"
                           if apres == "Oui" else ""))
     elif nature == "regroupée":
         raisons.append("zones de même condition regroupées")
@@ -207,12 +243,15 @@ def plan(groupe: str, chemin: Path, cible: Path, cellules: list) -> dict:
     natures = [_nature(c["avant"], c["valeur"]) for c in cellules]
     rubriques = natures.count("mal condensée")
     brutes = natures.count("brute")
+    reunies = natures.count("réunie")
     regroupees = natures.count("regroupée")
     coupees = sum(1 for c in cellules if "…" in c["valeur"])
     raisons = (([f"{rubriques} gardaient le deux-points et le tiret des rubriques de la "
                  f"liste, et souvent perdaient leur parenthèse fermante"] if rubriques else [])
                + ([f"{brutes} gardaient leurs zones telles que BDC-Statuts les écrit, "
                    f"désormais condensées comme les autres"] if brutes else [])
+               + ([f"{reunies} aux zones de plusieurs listes désormais réunies"]
+                  if reunies else [])
                + ([f"{regroupees} aux zones de même condition désormais regroupées"]
                   if regroupees else [])
                + ([f"{coupees} dont la remarque est coupée par BDC-Statuts à 255 caractères, "
@@ -350,13 +389,7 @@ def main() -> int:
         return ec.installer(args.classeurs, args.travail)
 
     contexte = service.charger_contexte(ec.RACINE)
-    archive = chemins.referentiels() / "BDC.zip"
-    avant = determinantes.depuis_bdc(archive, condenser=condition_1er_novembre)
-    apres = determinantes.depuis_bdc(archive)
-    if ec.EXPORT_NA.exists():
-        for listes in (avant, apres):
-            determinantes.ajouter_export_inpn(listes, ec.EXPORT_NA, "Nouvelle-Aquitaine",
-                                              contexte.index, ec.REFERENCE_NA)
+    avant, apres = listes(contexte)
 
     copies = args.travail / "classeurs"
     copies.mkdir(parents=True, exist_ok=True)

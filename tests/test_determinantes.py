@@ -156,9 +156,9 @@ class DomainesOccitanie(Cas, unittest.TestCase):
     ]
 
 
-def _cellule(*remarques, regionale=False):
+def _cellule(*remarques, regionale=False, **options):
     """La case d'une espèce que ces remarques déclarent, dans l'Allier et le Cantal."""
-    listes = d.Listes()
+    listes = d.Listes(**options)
     mention = listes._mention("1", AURA)
     reserves = {condition(r) for r in remarques}
     if regionale:
@@ -213,6 +213,16 @@ class Cellule(unittest.TestCase):
         mention = listes._mention("1", "Occitanie")
         mention.regionale |= {"MC, SO", "MED"}
         self.assertEqual(listes.cellule("1", "Occitanie"), "Oui (MC, SO ; MED)")
+
+    def test_sans_reunion(self):
+        # Ce que l'outil écrivait avant le 7 novembre 2026, et que
+        # outils/corriger_conditions.py doit reconnaître dans les classeurs :
+        # l'Azuré du Serpolet, « Oui (Alpin ; Méditerranéen) ».
+        self.assertEqual(_cellule("Alpine", "Méditerranéenne", reunir_zones=False),
+                         "Oui (Alpin ; Méditerranéen)")
+        self.assertEqual(_cellule("Méditerranéenne", VECTEUR_MC, regionale=True,
+                                  reunir_zones=False),
+                         "Oui (Massif central ; Méditerranéen)")
 
 
 if __name__ == "__main__":

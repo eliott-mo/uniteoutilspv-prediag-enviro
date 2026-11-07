@@ -304,6 +304,10 @@ class Listes:
     sources: dict[str, dict[str, str]] = field(default_factory=dict)
     #: Lignes écartées, par motif.
     ecartees: Counter = field(default_factory=Counter)
+    #: Réunir dans la case les zones de plusieurs listes (`_reunir_zones`).
+    #: `outils/corriger_conditions.py` s'en passe pour recomposer les cases
+    #: écrites avant le 7 novembre 2026.
+    reunir_zones: bool = True
 
     def _mention(self, cd_ref: str, territoire: str) -> Mention:
         return self.mentions.setdefault((cd_ref, territoire), Mention())
@@ -324,15 +328,16 @@ class Listes:
         mention = self.mentions.get((cd_ref, territoire))
         if mention is None:
             return ""
+        reunir = _reunir_zones if self.reunir_zones else list
         if mention.regionale:
             reserves = ([] if "" in mention.regionale
-                        else _reunir_zones(sorted(mention.regionale)))
+                        else reunir(sorted(mention.regionale)))
             return _oui(reserves)
 
         # Une ligne sans réserve l'emporte, dans un département, sur une
         # autre liste qui en poserait une.
         par_departement = {d: (frozenset() if "" in r
-                               else frozenset(_reunir_zones(sorted(r))))
+                               else frozenset(reunir(sorted(r))))
                            for d, r in mention.departements.items()}
         tous = self.departements.get(territoire, set())
         entier = set(par_departement) >= tous
