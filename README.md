@@ -24,15 +24,19 @@ Le référentiel métier, ce sont les **classeurs B-Statuts** maintenus par la
 responsable environnement : six classeurs (oiseaux, mammifères,
 amphibiens-reptiles, insectes, macrohétérocères, araignées), une ligne par
 taxon, indexés sur `CD_NOM`, couvrant toutes les régions et toutes les périodes.
+Un classeur de flore, d'une autre forme et d'une autre provenance, complète le
+prédiagnostic ; la veille l'ignore.
 
-Cet outil ne les remplace pas et **ne les modifie jamais**. Il les lit, les
-confronte aux référentiels nationaux de l'INPN, et produit une liste de
-constats à arbitrer.
+**Le classeur fait foi**, décision du 16 octobre 2026 : le prédiagnostic publie
+les statuts des classeurs. BDC-Statuts ne s'y substitue que colonne par
+colonne, là où un classeur n'a pas la colonne ou pas l'espèce, et le document
+le dit. Pour le reste, BDC surveille : la veille confronte les classeurs aux
+référentiels nationaux de l'INPN, et produit une liste de constats à arbitrer.
 
 > L'outil propose, l'experte arbitre.
 
-Quatre raisons de ne pas écrire dans les classeurs, par ordre croissant
-d'importance :
+La veille n'écrit jamais dans les classeurs. Quatre raisons, par ordre
+croissant d'importance :
 
 1. Ils sont pilotés par formules, avec en-têtes fusionnés et mises en forme
    conditionnelles ; une réécriture automatique les dégraderait.
@@ -42,6 +46,11 @@ d'importance :
    annotations « ssp. brookei, non reconnu TAXREF 14 » — qu'une synchronisation
    effacerait comme absents du référentiel.
 4. C'est elle qui signe les études.
+
+Les classeurs évoluent pourtant depuis le 1er novembre 2026 : à la demande,
+deux scripts y écrivent ce qu'on leur a demandé, par Excel et sur copie,
+chaque case commentée de sa valeur d'avant (voir « Écrire dans les
+classeurs »).
 
 ---
 
@@ -56,6 +65,12 @@ pip install -r requirements.txt
 Déposer les six classeurs dans `classeurs/`. Les noms sont reconnus par motif
 (`*oiseaux*.xlsx`, `*mammif*.xlsx`, `*amphib*.xlsx`, `*insectes*.xlsx`,
 `*macroh*.xlsx`, `*araign*.xlsx`).
+
+Un classeur reçu passe d'abord par `classeurs_a_valider/`. `classeurs/` est la
+référence que lit le prédiagnostic : un fichier n'y entre qu'après contrôle de
+la disposition de ses colonnes, des territoires reconnus, de l'écart taxon par
+taxon avec la version en place, et de l'effet sur un prédiagnostic réel (voir
+son `LISEZ-MOI.txt`).
 
 ### Usage
 
@@ -81,6 +96,7 @@ Un classeur Excel dans `sorties/`, un onglet par famille de constats :
 | ① À corriger dans ton fichier | une ligne porte la taxonomie d'une autre espèce, ou une coquille |
 | ② Taxonomie à rafraîchir | `CD_NOM` devenu synonyme ou supprimé dans TaxRef |
 | ③ Statuts qui ont bougé | un statut diffère de BDC-Statuts |
+| ④ Désaccords non arbitrables | BDC ne cite ni source ni date pour sa valeur — listes rouges européenne et mondiale : constat, sans proposition |
 
 Chaque ligne porte la valeur actuelle, la valeur proposée, la source, un lien de
 vérification en un clic, et une colonne **Décision** laissée vide
@@ -206,7 +222,11 @@ L'INPN diffuse bien une couche ENS, mais il la décrit comme « en
 construction » et prévient qu'elle « ne peut être considérée comme exhaustive
 ni utilisée comme donnée de référence ». La brancher en silence remplacerait
 un doute éclairé par une fausse certitude : le document afficherait un chiffre
-sourcé, et un chef de projet le croirait.
+sourcé, et un chef de projet le croirait. Elle est lue depuis le 15 octobre
+2026, mais pas en silence : figée à sa date de récupération comme les
+archives, elle complète ce qu'on dépose, et une couche déposée pour un
+département la remplace dans ce département — un avertissement dit laquelle
+des deux on lit.
 
 `sources_locales.py` fait donc trois choses.
 
@@ -254,7 +274,8 @@ devenaient illisibles.
 Ce que l'outil écrit lui-même : les dénombrements (« dans l'aire d'étude
 rapprochée, on recense 5 ZNIEFF de type I et 1 ZNIEFF de type II »), les
 distances, l'appartenance aux aires d'étude, les statuts de chaque espèce lus
-dans BDC-Statuts, les cartes, la numérotation des tableaux et des figures.
+dans les classeurs — et dans BDC-Statuts là où ils ne disent rien —, les
+cartes, la numérotation des tableaux et des figures.
 
 Ce qu'il laisse : tout jugement. Chaque trou est écrit en couleur et **formule
 sa consigne** — « indiquer lesquelles de ces espèces peuvent effectivement se
@@ -267,14 +288,22 @@ et revient à l'experte.
 Les tableaux de zonages portent une **ligne fusionnée par type**, comme le
 document de référence : « ZNIEFF de type I » occupe une ligne à lui seul et ses
 entrées suivent dessous, plutôt qu'une colonne « Type » qui répète la même
-valeur onze fois.
+valeur onze fois. Chaque zonage nomme ses espèces, cinq au plus par groupe et
+dix pour les habitats, en disant la coupe — « et 33 autres » : les plus forts
+enjeux d'abord, puis celles observées sur la commune, marquées d'un
+astérisque, puis l'ordre alphabétique. Les sites Natura 2000 disent en plus ce
+qui a motivé leur désignation.
 
 Les tableaux d'espèces ont les colonnes de leur groupe, reprises du document de
 référence : protection régionale et directive Habitats pour la flore ; annexe I
 de la directive Oiseaux et trois colonnes de liste rouge nationale — nicheurs,
 hivernants, de passage — pour l'avifaune ; annexe II et liste rouge pour les
 autres groupes. Le groupe se déduit du taxon (`GROUP3_INPN`) et ne se demande
-pas : un export de faune mêle les groupes.
+pas : un export de faune mêle les groupes. Tous portent le statut de
+déterminante ZNIEFF de la région du projet, condition comprise — « Oui (MC,
+SO) », « Oui (Massif central, Alpin : nicheur) ». Au-delà de 40 caractères, la
+case dit « Oui (sous conditions) » et la condition passe sous le tableau, avec
+« … » quand BDC l'a coupée.
 
 ### Ce que l'onglet B ne fait pas
 
@@ -299,9 +328,16 @@ site de l'INPN est en reconstruction et les appels directs tombent.
 |---|---|---|
 | **TaxRef** | 18 | taxonomie, synonymies, 49 476 noms vernaculaires français |
 | **BDC-Statuts** | 18 | LRE, LRN, LRR, LRM, ZDET, PN, PR, DH, DO, PNA |
+| **ZNIEFF, Natura 2000, espaces protégés** | archives de l'INPN | zonages du patrimoine naturel |
+| **ENS, ZICO** | flux WFS de l'INPN, figés à leur date de récupération | espaces naturels sensibles, zones importantes pour la conservation des oiseaux |
+| **Mesures compensatoires** | Cerema, par la Géoplateforme | ce qui a déjà été compensé autour du projet |
+| **Zones humides (BCAE 2)** | ministère de l'Agriculture, par la Géoplateforme | zones humides et tourbières de la conditionnalité de la PAC |
+| **Orthoptères** | Sardet & Defaut 2004 | indice national de priorité et domaines biogéographiques, que BDC ne porte pas |
 
-Source : Muséum national d'Histoire naturelle / PatriNat (OFB-MNHN-CNRS-IRD) —
-<https://inpn.mnhn.fr/referentiels-donnees>
+Source des référentiels de l'INPN : Muséum national d'Histoire naturelle /
+PatriNat (OFB-MNHN-CNRS-IRD) — <https://inpn.mnhn.fr/referentiels-donnees>.
+Chaque référentiel déclare sa version et son producteur dans
+`config/sources.yml`, et le document les cite chacun.
 
 **Licence Ouverte / Open Licence (Etalab)** : réutilisation libre, y compris
 commerciale, sous réserve de citer la source et sa date de mise à jour. Chaque
@@ -320,7 +356,8 @@ traduire produit des centaines de faux écarts — mesuré : **1 050 des 1 383
 premiers constats n'étaient que des différences d'écriture.**
 
 **Comparé** — listes rouges (`LRE`, `LRN`, `LRR`, `LRM`), ZNIEFF déterminantes
-(`ZDET`, booléen), directive Habitats (`DH`).
+(`ZDET`, condition comprise : « Oui » face à « Oui (SO) » est un écart, la
+liste restreignant l'espèce au domaine sud-ouest), directive Habitats (`DH`).
 
 **Non comparé**, et annoncé comme tel dans le rapport :
 
@@ -334,12 +371,62 @@ passage). Une colonne périodisée n'est confrontée que lorsqu'une seule de ses
 périodes est renseignée, l'appariement étant alors sans ambiguïté. C'est ce qui
 limite la couverture du classeur oiseaux.
 
+**Les listes ZNIEFF se lisent liste par liste**, et non dans l'index de BDC :
+il en range 85 % au département, sous « Hérault » plutôt que sous
+« Occitanie ». `determinantes.py` rapporte chaque liste au territoire qu'elle
+couvre, et condense sa remarque dans la notation des classeurs — « MC, SO »
+pour l'Occitanie, « Massif central, Alpin : nicheur » pour
+l'Auvergne-Rhône-Alpes. Deux listes d'un même territoire qui ne nomment que
+des zones se réunissent dans la case.
+
+---
+
+## Écrire dans les classeurs
+
+Deux scripts de `outils/` les font évoluer, à la demande et jamais d'après la
+veille :
+
+```bash
+python outils/enrichir_classeurs.py    # colonnes DZ et orthoptères (1er novembre 2026)
+python outils/corriger_conditions.py   # conditions ZNIEFF mal condensées (6 et 7 novembre)
+```
+
+Le circuit est le même pour les deux :
+
+1. **des copies**, dans `%USERPROFILE%\prediag-enviro-travail` : sur ce poste,
+   Excel piloté ne voit aucun fichier sous AppData, et se fige à la fermeture
+   d'un fichier OneDrive ;
+2. **Excel écrit lui-même** (`excel_appliquer.ps1`) : une bibliothèque Python
+   perdrait les commentaires, les mises en forme conditionnelles et les
+   valeurs calculées de « Saisie étude » ;
+3. **une vérification** : rien n'a bougé hors du plan — valeurs, formules,
+   commentaires, mises en forme conditionnelles, listes de validation, dans
+   aucun onglet ;
+4. **`--installer`** sauvegarde les originaux dans
+   `%LOCALAPPDATA%\prediag-enviro\sauvegardes\classeurs_<date>`, puis installe
+   en production et dans le dépôt.
+
+Chaque case modifiée porte un commentaire avec sa valeur d'avant, et « Suivi
+modifs statuts » reçoit une ligne par classeur. `corriger_conditions.py` ne
+réécrit une case que si elle porte encore exactement ce que l'outil y a écrit ;
+toute autre est laissée, et signalée.
+
+Deux pièges de PowerShell, dans `excel_appliquer.ps1` : une même affectation
+COM `.Value2 = $v` se fige sur le type de la première valeur reçue — d'où une
+affectation par type —, et un script sans BOM est lu en cp1252, ce qui casse
+ses tirets longs.
+
+Les classeurs du dépôt ne sont pas identiques à l'octet près à ceux de
+production : SharePoint réinscrit dans chaque fichier ses propres métadonnées
+(`customXml/`, `docProps/custom.xml`). Pour comparer deux versions, comparer
+leurs onglets.
+
 ---
 
 ## Appariement des noms
 
 `prediag_enviro.taxref.Index.apparier()` résout un nom — vernaculaire ou
-scientifique — vers un `cd_ref`. Il servira au volet 2 pour recouper les
+scientifique — vers un `cd_ref`. L'onglet B s'en sert pour recouper les
 sources d'occurrences.
 
 Taux mesurés sur 360 espèces tirées des classeurs :
@@ -371,10 +458,18 @@ Le départage n'est pas affaire de goût : OneDrive synchronise ce qu'il voit.
 app.py                    l'interface, deux onglets
 _LANCER Prediag.bat       le lanceur Windows
 run_veille.py             la veille en ligne de commande
-config/sources.yml        référentiels épinglés (URL, version)
-classeurs/                les six classeurs B-Statuts, maître unique
+publier.py                la publication vers la production
+config/sources.yml        référentiels épinglés (URL, version, producteur)
+classeurs/                les six classeurs B-Statuts et celui de la flore, maître unique
 extraits/                 zonages par département, ~650 Mo pour la France
+alias/                    les noms d'espèces appris, un fichier par contributeur
+sources_locales/          les couches déposées et leur registre, par département
+modele/                   le modèle Word
+outils/                   écriture dans les classeurs, fabrication du modèle, orthoptères
 ```
+
+Le dépôt seul porte `classeurs_a_valider/`, le sas des classeurs reçus, et
+`tests/`.
 
 **Sur la machine** (`%LOCALAPPDATA%\prediag-enviro`) — ce qui est lourd, dérivé
 ou écrit pendant l'exécution :
@@ -384,6 +479,7 @@ venv/                     l'environnement Python (~300 Mo)
 referentiels/             archives INPN + index (jusqu'à 1 Go)
 memoire/arbitrages.json   décisions rendues, alias appris
 sorties/                  rapports et documents produits
+sauvegardes/              versions précédentes des classeurs et des extraits, datées
 ```
 
 Les archives nationales ne servent qu'à **construire** les extraits : seul le
@@ -398,10 +494,16 @@ synchronisé pour chaque personne, et des copies de conflit sur les fichiers
 ```
 
 src/prediag_enviro/
+    chemins.py        ce qui se partage, ce qui reste sur la machine
     referentiels.py   téléchargement avec reprise, épinglage des versions
+    archives.py       extraction des archives de l'INPN
     taxref.py         index TaxRef, moteur d'appariement
     bdc.py            index BDC-Statuts
+    determinantes.py  listes ZNIEFF, territoire par territoire, conditions condensées
     classeurs.py      lecture des classeurs (dispositions hétérogènes)
+    implantation.py   où implanter des colonnes dans un classeur
+    flore.py          le classeur de flore
+    reference.py      les classeurs comme référence, repli sur BDC colonne par colonne
     vocabulaire.py    correspondance des codes entre les deux sources
     veille.py         production des constats
     memoire.py        arbitrages et alias persistés
@@ -409,13 +511,12 @@ src/prediag_enviro/
     communes.py       emprise projet, communes et parts de surface
     recoupement.py    sources d'espèces déposées → liste unique
     zonages.py        croisement avec les zonages du patrimoine naturel
+    sources_locales.py zonages sans source nationale fiable, couches déposées
     extraits.py       extraits départementaux, construits une fois
     cartes.py         planches A4 paysage, fond Plan IGN
-    statuts_especes.py colonnes de statuts par groupe, résolues sur BDC
+    statuts_especes.py colonnes de statuts par groupe
     sortie_word.py    construction du document (compteurs, tableaux, styles)
     rapport_prediag.py assemblage du prédiagnostic
-
-    modele/prediag_modele.docx   en-tête, pied de page, styles maison
     service.py        orchestration partagée interface / ligne de commande
 ```
 
@@ -430,6 +531,14 @@ les en-têtes et leurs plages fusionnées quand il est absent.
 ---
 
 ## Déploiement
+
+L'équipe lance l'outil depuis un dossier de production partagé, et c'est dans
+le dépôt qu'on développe. `publier.py --vers "<dossier>"` y copie le code — la
+liste `CODE` — et y dépose un `VERSION.txt`. Il ne copie jamais les données :
+`classeurs/`, `extraits/`, `alias/` et `sources_locales/` vivent en production
+et n'en bougent plus, sauf `--avec-donnees` pour la première mise en place. Il
+ne supprime rien non plus : un fichier retiré du dépôt reste en production, à
+retirer à la main.
 
 `packages.txt` déclare les dépendances système pour Streamlit Community Cloud :
 `tesseract-ocr` et `tesseract-ocr-fra`, ce dernier parce que sans le paquet de
@@ -451,6 +560,19 @@ Un déploiement n'aurait de sens qu'en limitant le périmètre aux référentiel
 d'espèces, ou en pré-construisant des référentiels réduits aux régions
 réellement couvertes.
 
+## Tests
+
+```bash
+python -m unittest      # depuis la racine du dépôt, avec le Python de l'outil
+```
+
+Le Python de l'outil est `%LOCALAPPDATA%\prediag-enviro\venv\Scripts\python.exe`.
+`tests/` couvre la condensation des remarques ZNIEFF de BDC-Statuts : vecteurs
+par zone d'Auvergne-Rhône-Alpes, remarques coupées à 255 caractères, listes de
+zones, domaines d'Occitanie, et les cases qu'en tirent deux listes d'un même
+territoire. Chaque cas porte sa remarque réelle : aucun référentiel n'est
+nécessaire. Les tests ne partent pas en production.
+
 ## Limites connues
 
 - **La détection des nouvelles listes rouges régionales n'est pas
@@ -466,16 +588,28 @@ réellement couvertes.
   case vide y signifie « non renseigné dans BDC », non « non évalué ». BDC
   porte parfois une évaluation **mondiale** là où il n'a pas d'évaluation
   européenne ; elle n'est pas recopiée dans la colonne Europe.
-- **Les zones humides ne sont pas alimentées.** Les couches de sols et de
-  milieux humides ne sont pas nationales et relèvent de sources régionales. La
-  rubrique sort avec une consigne qui nomme les sources à consulter.
+- **Les zones humides ne sont qu'en partie alimentées.** La couche des zones
+  humides et tourbières de la BCAE 2 est croisée depuis le 19 octobre 2026,
+  mais ce n'est pas l'inventaire des zones humides : son objet est agricole, et
+  sa couverture suit la délimitation menée région par région. Une aire d'étude
+  sans polygone ne prouve donc rien. Les sols et les prélocalisations
+  régionales restent à consulter, et la rubrique sort avec une consigne qui
+  les nomme.
+- **BDC-Statuts coupe certaines remarques à 255 caractères** : 385 lignes
+  déterminantes, de six listes, dont 348 de celle d'Auvergne-Rhône-Alpes
+  (2020). L'outil marque la coupure d'un « … », et le prédiagnostic l'explique
+  en note ; la suite ne se trouve que dans la liste d'origine.
+- **BDC v18 n'a pas les oiseaux nicheurs de Nouvelle-Aquitaine.** L'export
+  qu'en publie l'INPN, rangé dans les référentiels, a servi à écrire la
+  colonne du classeur des oiseaux ; le repli du prédiagnostic ne le lit pas.
 - **La casse des noms de zonages est une aide de présentation.** Les noms que
   le référentiel porte tout en capitales sont remis en casse de lecture, avec
   une liste de particules et de noms communs de géographie. Un nom commun
   absent de cette liste prend une capitale de trop : coquille visible et
   corrigeable, préférée à la décapitalisation des noms propres que produisait
   le passage en bas de casse.
-- **L'écriture dans les classeurs n'est pas implémentée**, délibérément. Le jour
-  où elle le sera, elle passera par le pilotage d'Excel (et non par une
-  réécriture du fichier), travaillera sur copie horodatée, n'appliquera que les
-  lignes marquées `accepté` et ne supprimera jamais de ligne.
+- **La veille n'applique pas ses arbitrages.** Une ligne `accepté` reste à
+  reporter à la main dans le classeur. L'écriture existe désormais — voir
+  « Écrire dans les classeurs » — : c'est par elle que passerait cette
+  application, sur les seules lignes acceptées, sans jamais supprimer de
+  ligne.
