@@ -21,7 +21,7 @@ ainsi sous « Rhône » des lignes des listes des Hauts-de-France, où le Nord
 manque.
 
 **La réserve fait la valeur du statut.** Près de la moitié des lignes en
-portent une. Elle est reprise telle quelle, sauf deux formes condensées sans
+portent une. Elle est reprise telle quelle, sauf trois formes condensées sans
 perte :
 
 * les domaines d'Occitanie — « Déterminant Massif Central - Déterminant Zone
@@ -29,7 +29,13 @@ perte :
   mammifères emploie déjà ;
 * le vecteur par zone d'Auvergne-Rhône-Alpes — « Alpine : Déterminante ;
   Méditerranéenne : Non déterminante ; … » —, dont on garde les zones où
-  l'espèce compte, regroupées par condition.
+  l'espèce compte, regroupées par condition ;
+* les listes de zones des coléoptères saproxyliques et des bryophytes
+  d'Auvergne-Rhône-Alpes — « Continentale - Massif Central,Alpine, » devient
+  « Massif central, Alpin ».
+
+Deux listes d'un même territoire qui ne nomment que des zones se réunissent
+dans la case (voir `_reunir_zones`).
 
 Une remarque que BDC a coupée à 255 caractères finit par « … » (voir
 `COUPURE_BDC`) : la reprendre telle quelle la donnerait pour entière.
@@ -94,16 +100,37 @@ def _texte(brut) -> str:
 
 
 def _zones_aura(cle: str) -> list[str] | None:
-    """Les zones qu'une clé du vecteur nomme, ou `None` si ce n'en est pas une."""
+    """Les zones qu'une clé du vecteur nomme, ou `None` si ce n'en est pas une.
+
+    Une virgule finale ne compte pas : la liste des coléoptères saproxyliques
+    écrit « Continentale - Massif Central,Alpine, ».
+    """
     zones = []
     for morceau in cle.split(","):
         bas = morceau.strip().lower().replace("–", "-")
+        if not bas:
+            continue
         bas = re.sub(r"^continentale\s*-\s*", "", bas)
         nom = next((court for motif, court in ZONES_AURA if bas == motif), None)
         if nom is None:
             return None
         zones.append(nom)
-    return zones
+    return zones or None
+
+
+def _liste_de_zones(texte: str) -> str | None:
+    """« Continentale - Massif Central,Alpine, » → « Massif central, Alpin ».
+
+    Les listes de 2020 des coléoptères saproxyliques et des bryophytes ne
+    nomment que les zones où l'espèce compte, sans condition : les quatre
+    valent le territoire entier. `None` si le texte n'est pas une liste de
+    zones. Jusqu'au 7 novembre 2026, ces remarques restaient brutes.
+    """
+    zones = _zones_aura(texte)
+    if zones is None:
+        return None
+    zones = list(dict.fromkeys(zones))
+    return "" if len(zones) == len(ZONES_AURA) else ", ".join(zones)
 
 
 def _debut_de_zone(cle: str) -> bool:
@@ -207,16 +234,19 @@ def _vecteur_aura(texte: str, coupee: bool = False) -> str | None | bool:
 
 
 def _domaines_occitanie(texte: str) -> str | None:
-    """« Déterminant Zone Sud-Ouest - Déterminant Massif Central » → « MC, SO »."""
+    """« Déterminant Zone Sud-Ouest - Déterminant Massif Central » → « MC, SO ».
+
+    L'avis du CSRPN d'Occitanie de 2023 écrit « Determinant », sans accent.
+    """
     bas = texte.lower()
-    if not bas.startswith("déterminant "):
+    if not re.match(r"d[ée]terminant ", bas):
         return None
     codes = []
     for motif, code in DOMAINES_OCCITANIE:
         if motif in bas:
             codes.append(code)
             bas = bas.replace(motif, " ")
-    reste = re.sub(r"déterminant|\bzones?\b|\bet\b|[-,–]|\s", "", bas)
+    reste = re.sub(r"d[ée]terminant|\bzones?\b|\bet\b|[-,–]|\s", "", bas)
     return ", ".join(codes) if codes and not reste else None
 
 
@@ -234,6 +264,9 @@ def condition(brut, coupee: bool = False) -> str | None:
     vecteur = _vecteur_aura(texte, coupee)
     if vecteur is not False:
         return vecteur
+    zones = None if coupee else _liste_de_zones(texte)
+    if zones is not None:
+        return zones
     reserve = _domaines_occitanie(texte) or texte
     return _couper(reserve) if coupee else reserve
 
@@ -293,12 +326,13 @@ class Listes:
             return ""
         if mention.regionale:
             reserves = ([] if "" in mention.regionale
-                        else sorted(mention.regionale))
+                        else _reunir_zones(sorted(mention.regionale)))
             return _oui(reserves)
 
         # Une ligne sans réserve l'emporte, dans un département, sur une
         # autre liste qui en poserait une.
-        par_departement = {d: (frozenset() if "" in r else frozenset(r))
+        par_departement = {d: (frozenset() if "" in r
+                               else frozenset(_reunir_zones(sorted(r))))
                            for d, r in mention.departements.items()}
         tous = self.departements.get(territoire, set())
         entier = set(par_departement) >= tous
@@ -337,6 +371,32 @@ def _departements(deps) -> str:
 
 def _oui(morceaux: list[str]) -> str:
     return f"Oui ({' ; '.join(morceaux)})" if morceaux else "Oui"
+
+
+#: Les zones d'Auvergne-Rhône-Alpes, telles que la condensation les écrit.
+_NOMS_AURA = tuple(court for _, court in ZONES_AURA)
+
+
+def _reunir_zones(reserves: list[str]) -> list[str]:
+    """Les réserves de plusieurs listes, réunies quand elles ne nomment que des zones.
+
+    Une liste dit « Massif central », une autre « Méditerranéen » : l'espèce
+    compte dans les deux zones, « Massif central, Méditerranéen » ; dans les
+    quatre, sur tout le territoire. Une réserve qui pose une condition les
+    laisse côte à côte, et « ; » ne sépare ainsi que des conditions
+    différentes, comme dans le vecteur.
+    """
+    if len(reserves) < 2:
+        return reserves
+    zones = set()
+    for reserve in reserves:
+        noms = reserve.split(", ")
+        if not set(noms) <= set(_NOMS_AURA):
+            return reserves
+        zones.update(noms)
+    if len(zones) == len(_NOMS_AURA):
+        return []
+    return [", ".join(nom for nom in _NOMS_AURA if nom in zones)]
 
 
 def _territoire_du_document(departements: Counter) -> tuple[str, set[str]]:
@@ -510,8 +570,9 @@ def ajouter_export_inpn(listes: Listes, chemin: Path, territoire: str,
 #: il est validé par la version de BDC, qui ne bouge pas quand c'est notre
 #: code qui change — même garde-fou que `bdc.FORMAT`. 2 : la condensation
 #: d'Auvergne-Rhône-Alpes corrigée, et les remarques coupées marquées
-#: (6 novembre 2026).
-FORMAT = 2
+#: (6 novembre 2026). 3 : les listes de zones condensées, et « Determinant »
+#: sans accent reconnu (7 novembre 2026).
+FORMAT = 3
 
 
 def charger(archive: Path, version: str, cache: Path | None = None) -> Listes:

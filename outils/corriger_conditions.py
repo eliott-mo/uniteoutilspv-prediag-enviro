@@ -17,7 +17,12 @@ celles de cette liste comme de cinq autres (voir `determinantes.COUPURE_BDC`).
 
 Le 6 novembre 2026, ce script a réécrit 203 cases : les 187 des oiseaux, 12
 chez les mammifères (Auvergne-Rhône-Alpes, Île-de-France, Aquitaine), 4 chez
-les insectes (Corse). Relancé, il n'en trouve plus aucune.
+les insectes (Corse).
+
+Le 7 novembre 2026, 11 autres chez les insectes : les coléoptères
+saproxyliques d'Auvergne-Rhône-Alpes, dont la liste ne nomme que des zones,
+gardaient la forme de BDC — « Oui (Continentale - Massif Central,Alpine,) ».
+Relancé, il n'en trouve plus aucune.
 
 **Ce que fait ce script.** Il calcule chaque case DZ deux fois : par la
 condensation du 1er novembre, recopiée ici, et par celle d'aujourd'hui. Il ne
@@ -99,19 +104,43 @@ def condition_1er_novembre(brut, coupee: bool = False) -> str | None:
 
 # ---------------------------------------------------------- les corrections
 
+#: Ce que la condensation laissait tel que BDC-Statuts l'écrit : un vecteur
+#: coupé dans un nom de zone, une liste de zones (« Continentale - Massif
+#: Central,Alpine, »), un domaine d'Occitanie écrit « Determinant ».
+_BRUTE = re.compile(r"Continentale|Alpine|Méditerranéenne|\bDeterminant\b")
+
+
+def _nature(avant: str, apres: str) -> str:
+    """Ce qui clochait : « mal condensée », « brute », « regroupée », ou rien.
+
+    Rien quand seule la coupure de BDC est désormais marquée.
+    """
+    if " : :" in avant or re.search(r"\bD[ée]te(r)?\b(?!m)", avant):
+        return "mal condensée"
+    if _BRUTE.search(avant):
+        return "brute"
+    if apres.rstrip(")").removesuffix("…") != avant.rstrip(")"):
+        return "regroupée"
+    return ""
+
+
 def _raisons(avant: str, apres: str) -> str:
     """Pourquoi la case change, dit à la responsable environnement.
 
-    Trois raisons, qui se cumulent : la condensation fautive (« : : », un état
-    « Déte » pris pour une condition, un vecteur resté brut), le regroupement
-    des zones, la coupure de BDC.
+    La condensation fautive (« : : », un état « Déte » pris pour une
+    condition), ou absente (les zones écrites comme dans BDC), ou le
+    regroupement des zones ; et, s'y ajoutant, la coupure de BDC.
     """
     raisons = []
-    seule_coupure = apres.rstrip(")").removesuffix("…") == avant.rstrip(")")
-    if (" : :" in avant or "Continentale" in avant
-            or re.search(r"\bD[ée]te(r)?\b(?!m)", avant)):
+    nature = _nature(avant, apres)
+    if nature == "mal condensée":
         raisons.append("la condition écrite le 01/11/2026 était mal condensée")
-    elif not seule_coupure:
+    elif nature == "brute":
+        raisons.append("la condition écrite le 01/11/2026 n'était pas condensée : "
+                       "ses zones restaient écrites comme dans BDC-Statuts"
+                       + (" ; réunies, les zones des listes couvrent tout le territoire"
+                          if apres == "Oui" else ""))
+    elif nature == "regroupée":
         raisons.append("zones de même condition regroupées")
     if "…" in apres:
         raisons.append("la remarque de BDC-Statuts est coupée à 255 caractères : "
@@ -175,14 +204,15 @@ def plan(groupe: str, chemin: Path, cible: Path, cellules: list) -> dict:
     for c in cellules:
         par_colonne[c["territoire"]] = par_colonne.get(c["territoire"], 0) + 1
     detail = ", ".join(f"DZ {t} {n}" for t, n in sorted(par_colonne.items()))
-    rubriques = sum(1 for c in cellules if " : :" in c["avant"])
-    brutes = sum(1 for c in cellules if " : :" not in c["avant"] and "Continentale" in c["avant"])
-    regroupees = sum(1 for c in cellules if "regroupées" in c["commentaire"])
+    natures = [_nature(c["avant"], c["valeur"]) for c in cellules]
+    rubriques = natures.count("mal condensée")
+    brutes = natures.count("brute")
+    regroupees = natures.count("regroupée")
     coupees = sum(1 for c in cellules if "…" in c["valeur"])
     raisons = (([f"{rubriques} gardaient le deux-points et le tiret des rubriques de la "
                  f"liste, et souvent perdaient leur parenthèse fermante"] if rubriques else [])
-               + ([f"{brutes}, dont BDC coupe la remarque dans un nom de zone, étaient "
-                   f"restées brutes"] if brutes else [])
+               + ([f"{brutes} gardaient leurs zones telles que BDC-Statuts les écrit, "
+                   f"désormais condensées comme les autres"] if brutes else [])
                + ([f"{regroupees} aux zones de même condition désormais regroupées"]
                   if regroupees else [])
                + ([f"{coupees} dont la remarque est coupée par BDC-Statuts à 255 caractères, "
