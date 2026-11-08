@@ -275,8 +275,9 @@ Ce que l'outil écrit lui-même : les dénombrements (« dans l'aire d'étude
 rapprochée, on recense 5 ZNIEFF de type I et 1 ZNIEFF de type II »), les
 distances, l'appartenance aux aires d'étude, les statuts de chaque espèce lus
 dans les classeurs — et dans BDC-Statuts là où ils ne disent rien —, les
-plantes de la commune indicatrices de zones humides, les cartes, la
-numérotation des tableaux et des figures.
+plantes de la commune indicatrices de zones humides, les cartes — dont les
+photographies aériennes de la ZIP en 1950-1965 et aujourd'hui, pour la
+dynamique du site —, la numérotation des tableaux et des figures.
 
 Ce qu'il laisse : tout jugement. Chaque trou est écrit en couleur et **formule
 sa consigne** — « indiquer lesquelles de ces espèces peuvent effectivement se
@@ -334,6 +335,7 @@ site de l'INPN est en reconstruction et les appels directs tombent.
 | **Mesures compensatoires** | Cerema, par la Géoplateforme | ce qui a déjà été compensé autour du projet |
 | **Zones humides (BCAE 2)** | ministère de l'Agriculture, par la Géoplateforme | zones humides et tourbières de la conditionnalité de la PAC |
 | **Orthoptères** | Sardet & Defaut 2004 | indice national de priorité et domaines biogéographiques, que BDC ne porte pas |
+| **Photographies aériennes** | IGN, par la Géoplateforme — lues au rendu des planches, datées de ce jour | 1950-1965 et prise de vue la plus récente, pour la dynamique du site |
 
 Source des référentiels de l'INPN : Muséum national d'Histoire naturelle /
 PatriNat (OFB-MNHN-CNRS-IRD) — <https://inpn.mnhn.fr/referentiels-donnees>.
@@ -446,6 +448,21 @@ Deux règles font l'essentiel de la fiabilité :
   mais convertit des faux silencieux en « non résolu » explicites.
 - **préférence de rang** — « Effraie des clochers » renvoie *Tyto alba* et deux
   sous-espèces ; on garde l'espèce.
+
+**Un taxon relevé sous le rang d'espèce se lit comme son espèce** (depuis le
+8 novembre 2026), quand aucun classeur ne le porte et qu'un classeur porte son
+espèce. Les sources nomment parfois la sous-espèce — *Tyto alba delicatula*,
+*Cerambyx cerdo cerdo* — là où les classeurs ne portent que l'espèce. Ces
+taxons prenaient ce que BDC dit de la sous-espèce, souvent rien. À Bédarieux,
+c'était le cas de neuf taxons :
+- l'Effraie des clochers sortait sans protection ;
+- les neuf sortaient sans liste rouge.
+
+L'espèce se trouve par le parent que TaxRef donne à chaque taxon
+(`CD_TAXSUP`). Le document le dit sous chaque tableau concerné. Un taxon
+qu'un classeur porte garde sa propre ligne. Quand BDC répond, faute de
+colonne au classeur, il est interrogé sur la sous-espèce d'abord, puis sur
+l'espèce.
 
 ---
 
@@ -576,8 +593,12 @@ Le Python de l'outil est `%LOCALAPPDATA%\prediag-enviro\venv\Scripts\python.exe`
   territoire ;
 - la lecture de la colonne des zones humides du classeur de flore, et son
   cache, sur un classeur de trois lignes fabriqué pour l'occasion ;
-- ce que le document écrit des zones humides et la phrase des PNA, vérifiés
-  dans un document réellement produit.
+- l'espèce d'une sous-espèce dans TaxRef, sur une archive de quelques lignes,
+  et sa lecture par les classeurs et par BDC ;
+- les planches de photographies aériennes, le fond simulé hors ligne ;
+- ce que le document écrit des zones humides, de la dynamique du site, des
+  taxons lus à l'espèce, et la phrase des PNA, vérifiés dans un document
+  réellement produit.
 
 Chaque cas porte sa donnée réelle ou un échantillon fabriqué : aucun
 référentiel n'est nécessaire. Les tests ne partent pas en production.
@@ -626,6 +647,15 @@ référentiel n'est nécessaire. Les tests ne partent pas en production.
   déterminantes, de six listes, dont 348 de celle d'Auvergne-Rhône-Alpes
   (2020). L'outil marque la coupure d'un « … », et le prédiagnostic l'explique
   en note ; la suite ne se trouve que dans la liste d'origine.
+- **La trame verte et bleue n'est pas lue.** PatriNat diffuse une base
+  nationale des SRCE harmonisée selon le standard COVADIS (2017), en cinq
+  archives sur l'INPN : `inpn.mnhn.fr/docs/TVB/N_SRCE_RESERVOIR_S_000.zip`,
+  ainsi que `CORRIDOR_S`, `CORRIDOR_L`, `COURS_EAU_S` et `COURS_EAU_L`. Elles
+  répondaient en erreur 500 le 8 novembre 2026, et aucune copie n'a été
+  trouvée ailleurs (data.gouv.fr, Géoplateforme, flux Carmen de l'INPN). Le
+  MNHN précise que ces données n'ont pas de valeur juridique : le SRCE
+  approuvé fait foi, et les SRADDET l'ont depuis repris, parfois modifié. La
+  rubrique sort avec sa consigne.
 - **BDC v18 n'a pas les oiseaux nicheurs de Nouvelle-Aquitaine.** L'export
   qu'en publie l'INPN, rangé dans les référentiels, a servi à écrire la
   colonne du classeur des oiseaux ; le repli du prédiagnostic ne le lit pas.

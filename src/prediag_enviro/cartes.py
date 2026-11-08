@@ -4,9 +4,13 @@ Trois cartes, qui répondent aux cartes 2 à 4 de l'état initial :
 
     ZNIEFF de types I et II · Natura 2000 · Autres zonages
 
-A4 paysage, fond OpenStreetMap, cadrage sur l'aire d'étude rapprochée. Le
-bandeau latéral porte le titre, la légende, l'échelle, le nord, la source et le
+A4 paysage, fond Plan IGN, cadrage sur l'aire d'étude rapprochée. Le bandeau
+latéral porte le titre, la légende, l'échelle, le nord, la source et le
 logo — comme les planches des autres outils UNITe.
+
+S'y ajoutent, depuis le 8 novembre 2026, deux planches de photographies
+aériennes pour la « Dynamique du site » : les années 1950-1965, puis la prise
+de vue la plus récente, cadrées sur la ZIP et son aire d'étude immédiate.
 
 La machinerie de placement des étiquettes vient de l'outil raccordement, où
 elle a été mise au point sur des cas réels. Elle vaut d'être reprise plutôt que
@@ -59,6 +63,35 @@ FOND = {
     "attribution": "Plan IGN — Geoplateforme",
 }
 
+#: Les photographies aériennes de la « Dynamique du site ». Le document
+#: demandait de comparer l'occupation du sol d'aujourd'hui à celle des années
+#: 1950 sans montrer ni l'une ni l'autre : chacun allait les chercher sur le
+#: Géoportail. Les deux couches sont servies par la Géoplateforme, comme le
+#: Plan IGN — la première jusqu'au zoom 18, en PNG, la seconde jusqu'au 19,
+#: en JPEG —, et l'IGN les diffuse sous Licence Ouverte. La date de la prise
+#: de vue récente varie d'un département à l'autre : l'IGN la publie à part.
+ORTHO_1950 = {
+    "famille": "ortho_1950",
+    "titre": "Photographies aériennes 1950-1965",
+    "url": ("https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile"
+            "&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS.1950-1965"
+            "&STYLE=BDORTHOHISTORIQUE&TILEMATRIXSET=PM_0_18"
+            "&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png"),
+    "attribution": ("Photographies aériennes historiques 1950-1965 — IGN, "
+                    "Géoplateforme"),
+}
+ORTHO_ACTUELLE = {
+    "famille": "ortho_actuelle",
+    "titre": "Photographie aérienne la plus récente",
+    "url": ("https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile"
+            "&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS"
+            "&STYLE=normal&TILEMATRIXSET=PM_0_19"
+            "&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg"),
+    "attribution": ("Photographies aériennes les plus récentes — IGN, "
+                    "Géoplateforme"),
+}
+PHOTOGRAPHIES = (ORTHO_1950, ORTHO_ACTUELLE)
+
 #: Emprise du projet, en rouge comme sur les planches des autres outils.
 COULEUR_EMPRISE = "#ff2d00"
 #: Cercles des aires d'étude : présents mais discrets, ce sont des repères.
@@ -100,6 +133,11 @@ class Carte:
     titre: str
     chemin: Path
     nb_zonages: int
+    #: Ce qui fait le fond, quand il est la matière même de la carte — les
+    #: photographies aériennes —, et le jour où il a été lu : la Licence
+    #: Ouverte demande l'un et l'autre.
+    fond: str = ""
+    date: str = ""
 
 
 # ───────────────────────────────────────────────────────── étiquettes ──
@@ -302,7 +340,8 @@ def _replier_bandeau(texte: str, taille: float) -> str:
     return "\n".join(lignes)
 
 
-def _remplir_bandeau(ax, lignes_titre, poignees, source):
+def _remplir_bandeau(ax, lignes_titre, poignees, source, fond=None):
+    fond = fond or FOND
     y = 0.98
     for texte, taille, graisse in lignes_titre:
         replie = _replier_bandeau(texte, taille)
@@ -326,7 +365,9 @@ def _remplir_bandeau(ax, lignes_titre, poignees, source):
                             alignment="left", handlelength=1.4, labelspacing=0.6)
         legende.get_title().set_fontweight("bold")
 
-    ax.text(0.03, 0.055, f"Source : {source}\nFond : {FOND['attribution']}",
+    ax.text(0.03, 0.055,
+            _replier_bandeau(f"Source : {source}\nFond : {fond['attribution']}",
+                             6.5),
             transform=ax.transAxes, fontsize=6.5, va="bottom", color="#333333")
 
     image = _logo()
@@ -474,7 +515,7 @@ def _zoom_automatique(ax) -> int | None:
         return None
 
 
-def _poser_fond(ax, tentatives: int = 3) -> bool:
+def _poser_fond(ax, tentatives: int = 3, fond=None) -> bool:
     """Pose le fond de plan, avec reprises.
 
     Une seule tuile en échec fait abandonner contextily, et la carte sort avec
@@ -499,12 +540,13 @@ def _poser_fond(ax, tentatives: int = 3) -> bool:
     # à la taille de leur zoom, si bien qu'un cran les double et deux les
     # quadruplent. Au zoom 11 pour un cadre de zoom 13, « St-Pierre-lès-Elbeuf »
     # barre la carte — on aurait troqué un fouillis contre un autre.
+    fond = fond or FOND
     automatique = _zoom_automatique(ax)
     niveaux = [None] if automatique is None else [automatique, automatique - 1]
     for rang, zoom in enumerate(niveaux):
         for tentative in range(tentatives):
             try:
-                cx.add_basemap(ax, source=FOND["url"],
+                cx.add_basemap(ax, source=fond["url"],
                                crs=f"EPSG:{CRS_AFFICHAGE}",
                                attribution_size=5,
                                **({} if zoom is None else {"zoom": zoom}))
@@ -775,10 +817,89 @@ def dessiner_famille(famille: str, titre: str, couches: dict, emprise_gdf,
                  nb_zonages=sum(len(g) for g in couches.values()))
 
 
+#: Couleur des repères posés sur une photographie aérienne : un trait sombre
+#: s'y perd dans les bois, un trait clair dans les cultures. Le blanc cerné
+#: de sombre se lit sur l'un et l'autre.
+COULEUR_REPERE_PHOTO = "white"
+CERNE_PHOTO = [pe.withStroke(linewidth=2.8, foreground=COULEUR_AIRE)]
+
+
+def dessiner_photographie(fond: dict, emprise_gdf, aires, chemin: Path,
+                          nom_projet: str, source: str = "UNITe") -> Carte:
+    """Une photographie aérienne de la ZIP et de son aire d'étude immédiate.
+
+    Le cadrage n'est pas celui des zonages : à 5 km, une photographie des
+    années 1950 ne montre plus rien de la ZIP. On cadre donc sur l'aire
+    d'étude immédiate, où se lit l'évolution des parcelles, des haies et du
+    bâti.
+
+    L'emprise n'est qu'un contour, sans la trame des autres cartes : la trame
+    masquerait précisément ce qu'on demande de regarder.
+    """
+    from datetime import date
+
+    emprise_union = emprise_gdf.geometry.union_all()
+    immediate = next((a for a in aires if a.code == "AEI"), None)
+    rayon = immediate.rayon_m if immediate is not None else 200.0
+    cadre_l93 = _cadre(emprise_union, rayon, marge=0.15)
+    x0, y0, x1, y1 = (gpd.GeoSeries([cadre_l93], crs=CRS_METRIQUE)
+                      .to_crs(CRS_AFFICHAGE).total_bounds)
+
+    fig, ax, ax_bandeau = _figure_a4()
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+    ax.apply_aspect()
+
+    fond_pose = _poser_fond(ax, fond=fond)
+
+    poignees = []
+    if immediate is not None:
+        anneau = gpd.GeoSeries([emprise_union.buffer(immediate.rayon_m)],
+                               crs=CRS_METRIQUE).to_crs(CRS_AFFICHAGE)
+        anneau.boundary.plot(ax=ax, color=COULEUR_REPERE_PHOTO, linewidth=1.3,
+                             linestyle=(0, (6, 4)), zorder=5)
+        ax.collections[-1].set_path_effects(CERNE_PHOTO)
+        poignees.append(Line2D(
+            [], [], color=COULEUR_REPERE_PHOTO, linewidth=1.3,
+            linestyle=(0, (6, 4)), path_effects=CERNE_PHOTO,
+            label=f"{immediate.libelle} "
+                  f"({_rayon_lisible(immediate.rayon_m)})"))
+    affichage = emprise_gdf.to_crs(CRS_AFFICHAGE)
+    affichage.plot(ax=ax, facecolor="none", edgecolor="white", linewidth=4.0,
+                   zorder=6)
+    affichage.plot(ax=ax, facecolor="none", edgecolor=COULEUR_EMPRISE,
+                   linewidth=2.0, zorder=7)
+    poignees.insert(0, Patch(facecolor="none", edgecolor=COULEUR_EMPRISE,
+                             linewidth=1.6, label="Emprise du projet (ZIP)"))
+
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+    _fleche_nord(ax)
+    _barre_echelle(ax, cadre_l93.centroid)
+
+    lignes_titre = [(fond["titre"], 12, "bold"), (nom_projet, 9, "normal")]
+    if not fond_pose:
+        lignes_titre.append(
+            ("⚠ Photographie indisponible au moment du rendu — relancer la "
+             "production des cartes", 7.5, "normal")
+        )
+    _remplir_bandeau(ax_bandeau, lignes_titre, poignees, source, fond=fond)
+
+    ax.set_axis_off()
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(chemin, dpi=200, bbox_inches="tight", pad_inches=0.15)
+    plt.close(fig)
+    return Carte(famille=fond["famille"], titre=fond["titre"], chemin=chemin,
+                 nb_zonages=0, fond=fond["attribution"],
+                 date=date.today().strftime("%d/%m/%Y"))
+
+
 def produire(resultat, emprise_gdf, aires, dossier: Path, nom_projet: str,
              familles=None, source: str = "UNITe",
-             avec_situation: bool = True) -> list[Carte]:
-    """Produit la carte de situation, puis une carte par famille présente.
+             avec_situation: bool = True,
+             avec_photographies: bool = True) -> list[Carte]:
+    """Produit la carte de situation, une carte par famille présente, puis
+    les photographies aériennes de la « Dynamique du site ».
 
     Une carte par famille plutôt qu'une carte unique : superposer ZNIEFF,
     Natura 2000 et espaces protégés sur un même fond donne un dégradé illisible
@@ -800,4 +921,9 @@ def produire(resultat, emprise_gdf, aires, dossier: Path, nom_projet: str,
                                  chemin, nom_projet, source)
         if carte is not None:
             produites.append(carte)
+    if avec_photographies:
+        for fond in PHOTOGRAPHIES:
+            produites.append(dessiner_photographie(
+                fond, emprise_gdf, aires,
+                dossier / f"carte_{fond['famille']}.png", nom_projet, source))
     return produites

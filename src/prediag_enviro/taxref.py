@@ -38,7 +38,8 @@ from pathlib import Path
 csv.field_size_limit(10 ** 7)
 
 #: Change à chaque modification de la forme sérialisée (invalide les caches).
-_FORMAT_CACHE = 4
+#: 5 : le parent de chaque taxon, `cd_sup` (8 novembre 2026).
+_FORMAT_CACHE = 5
 
 # Groupes INPN (GROUP2_INPN) admis pour chaque classeur B-Statuts.
 GROUPES_INPN: dict[str, set[str]] = {
@@ -138,6 +139,9 @@ class Taxon:
     #: que le prédiagnostic externe leur consacre une section entière.
     ordre: str = ""
     nom_vern: str = ""   # nom français de référence, pour les tableaux d'étude
+    #: CD_TAXSUP — le cd_nom du taxon parent, qui mène d'une sous-espèce à
+    #: son espèce. Voir `Index.espece`.
+    cd_sup: str = ""
 
     @property
     def est_synonyme(self) -> bool:
@@ -202,6 +206,8 @@ class Index:
                     groupe3=(ligne["GROUP3_INPN"] or "").strip(),
                     ordre=(ligne["ORDRE"] or "").strip(),
                     nom_vern=str(ligne["NOM_VERN"] or "").split(",")[0].strip(),
+                    cd_sup=(ligne.get("CD_TAXSUP") or ligne.get("CD_SUP")
+                            or "").strip(),
                 )
                 forme = normaliser(ligne["LB_NOM"])
                 if forme:
@@ -273,6 +279,29 @@ class Index:
 
     def est_disparu(self, cd_nom: str) -> tuple[str, str] | None:
         return self.disparus.get(str(cd_nom).strip())
+
+    def espece(self, cd: str) -> str | None:
+        """Le cd_ref de l'espèce dont relève un taxon infraspécifique.
+
+        Les relevés nomment parfois la sous-espèce — *Tyto alba delicatula*,
+        *Cerambyx cerdo cerdo* — là où les classeurs ne portent que
+        l'espèce. On remonte les parents, chacun pris sous son nom de
+        référence puisque TaxRef peut donner le parent sous un synonyme,
+        jusqu'à l'espèce. Quatre crans suffisent : une variété de sous-espèce
+        en demande deux. Rien pour une espèce, ni au-dessus — un genre ne
+        mène à aucune espèce.
+        """
+        taxon = self.taxons.get(str(cd).strip())
+        if taxon is None or taxon.rang == "ES":
+            return None
+        for _ in range(4):
+            parent = self.taxons.get(getattr(taxon, "cd_sup", ""))
+            if parent is None:
+                return None
+            taxon = self.taxons.get(parent.cd_ref, parent)
+            if taxon.rang == "ES":
+                return taxon.cd_ref
+        return None
 
     def _filtrer_groupe(self, cds: list[str], groupe: str | None) -> list[str]:
         admis = GROUPES_INPN.get(groupe or "")

@@ -30,11 +30,12 @@ def _projet():
         aires=[mod_zonages.AireEtude(*a) for a in mod_zonages.AIRES_DEFAUT])
 
 
-def _paragraphes(resultat_zonages=None):
+def _paragraphes(resultat_zonages=None, cartes=()):
     """Le texte des paragraphes du document produit, dans l'ordre."""
     with tempfile.TemporaryDirectory() as dossier:
         chemin = Path(dossier) / "essai.docx"
-        rp.ecrire(chemin, _projet(), resultat_zonages=resultat_zonages)
+        rp.ecrire(chemin, _projet(), resultat_zonages=resultat_zonages,
+                  cartes=cartes)
         return [p.text for p in Document(chemin).paragraphs]
 
 
@@ -184,6 +185,64 @@ class FloreIndicatrice(unittest.TestCase):
             "La flore indicatrice de zones humides n'a pas été recherchée : "
             "aucun classeur de flore installé ne porte la colonne « ZH "
             "(Arrêté 2008) ».")
+
+
+class DynamiqueDuSite(unittest.TestCase):
+    """Les photographies aériennes d'hier et d'aujourd'hui, puis la consigne."""
+
+    SUIVANT = "Prise en compte de la Trame verte et bleue"
+
+    def test_avec_photographies(self):
+        from PIL import Image
+
+        from prediag_enviro import cartes
+        with tempfile.TemporaryDirectory() as dossier:
+            planches = []
+            for fond in (cartes.ORTHO_1950, cartes.ORTHO_ACTUELLE):
+                chemin = Path(dossier) / f"{fond['famille']}.png"
+                Image.new("RGB", (300, 200), "white").save(chemin)
+                planches.append(cartes.Carte(
+                    famille=fond["famille"], titre=fond["titre"],
+                    chemin=chemin, nb_zonages=0, fond=fond["attribution"],
+                    date="08/11/2026"))
+            paragraphes = _paragraphes(cartes=planches)
+        texte = " ".join(_section(paragraphes, "Dynamique du site",
+                                  self.SUIVANT))
+        self.assertIn("1950-1965", texte)
+        self.assertIn("Photographie aérienne la plus récente", texte)
+        self.assertIn("[À compléter — comparer l'occupation du sol", texte)
+        bibliographie = paragraphes[paragraphes.index("Bibliographie"):]
+        self.assertIn(f"{cartes.ORTHO_1950['attribution']}, consultées le "
+                      "08/11/2026", bibliographie)
+
+    def test_sans_photographies(self):
+        section = [p for p in _section(_paragraphes(), "Dynamique du site",
+                                       self.SUIVANT) if p.strip()]
+        self.assertEqual(len(section), 1)
+        self.assertTrue(section[0].startswith("[À compléter — comparer"))
+
+
+class LusALEspece(unittest.TestCase):
+    """La note sous un tableau dont des taxons sont lus comme leur espèce."""
+
+    def test_un_taxon(self):
+        self.assertEqual(
+            rp._phrase_lus_a_l_espece([("Tyto alba delicatula", "Tyto alba")]),
+            "1 taxon relevé sous le rang d'espèce ne figure pas dans les "
+            "classeurs de référence d'UNITe, qui portent son espèce : ses "
+            "statuts sont ceux de l'espèce — Tyto alba delicatula (Tyto alba).")
+
+    def test_plusieurs_taxons(self):
+        self.assertEqual(
+            rp._phrase_lus_a_l_espece([("Tyto alba delicatula", "Tyto alba"),
+                                       ("Bubulcus ibis ibis", "Bubulcus ibis")]),
+            "2 taxons relevés sous le rang d'espèce ne figurent pas dans les "
+            "classeurs de référence d'UNITe, qui portent leur espèce : leurs "
+            "statuts sont ceux de l'espèce — Bubulcus ibis ibis (Bubulcus ibis) "
+            "et Tyto alba delicatula (Tyto alba).")
+
+    def test_aucun(self):
+        self.assertEqual(rp._phrase_lus_a_l_espece([]), "")
 
 
 if __name__ == "__main__":

@@ -160,6 +160,15 @@ def _deposer(fichier) -> Path:
     return cible
 
 
+def _legende_carte(carte) -> str:
+    """« Natura 2000 — 3 zonage(s) », ou le seul titre d'une carte qui n'en
+    porte pas : la situation et les photographies aériennes affichaient
+    « 0 zonage(s) »."""
+    if carte.nb_zonages:
+        return f"{carte.titre} — {carte.nb_zonages} zonage(s)"
+    return carte.titre
+
+
 @st.dialog("Carte", width="large")
 def _agrandir(carte) -> None:
     """Montre une carte en grand, pour la contrôler avant de produire.
@@ -173,7 +182,7 @@ def _agrandir(carte) -> None:
     dialogue n'affiche pas 3 500 px, et la lecture fine se fait dans une
     visionneuse.
     """
-    st.markdown(f"**{carte.titre}** — {carte.nb_zonages} zonage(s)")
+    st.markdown(f"**{_legende_carte(carte)}**")
     st.image(str(carte.chemin), width="stretch")
     st.download_button(
         "⬇️ Télécharger en pleine définition", Path(carte.chemin).read_bytes(),
@@ -873,8 +882,7 @@ with onglet_b:
                 for colonne, carte in zip(st.columns(len(produites)), produites):
                     with colonne:
                         st.image(str(carte.chemin), width="stretch")
-                        st.caption(f"{carte.titre} — "
-                                   f"{carte.nb_zonages} zonage(s)")
+                        st.caption(_legende_carte(carte))
                         if st.button("Agrandir", width="stretch",
                                      key=f"zoom_{carte.famille}"):
                             _agrandir(carte)

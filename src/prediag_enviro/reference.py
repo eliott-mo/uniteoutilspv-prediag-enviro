@@ -113,7 +113,7 @@ class Reference:
     sorte que `statuts_especes` n'a pas à savoir d'où vient la valeur.
     """
 
-    def __init__(self, classeurs: dict[str, Classeur]):
+    def __init__(self, classeurs: dict[str, Classeur], index=None):
         self.classeurs = classeurs
         #: cd_nom -> fiche. Un même taxon peut figurer dans deux classeurs —
         #: la responsable environnement a reconnu des doublons entre insectes
@@ -125,9 +125,33 @@ class Reference:
                 cd = str(taxon.cd_nom).strip()
                 if cd and cd not in self._par_cd:
                     self._par_cd[cd] = _Fiche(classeur, taxon)
+        #: L'index TaxRef, qui mène d'une sous-espèce à son espèce : voir
+        #: `lu_comme`. Sans lui, un taxon se lit à son seul cd_ref.
+        self.index = index
 
     def __len__(self) -> int:
         return len(self._par_cd)
+
+    def lu_comme(self, cd_ref: str) -> str:
+        """Le taxon dont la ligne répond pour ce cd_ref : lui, ou son espèce.
+
+        **Décision du 8 novembre 2026.** Les classeurs portent l'espèce ; les
+        relevés nomment parfois la sous-espèce. À Bédarieux, neuf taxons
+        relevés ainsi perdaient la ligne de leur espèce, et prenaient ce que
+        BDC dit de la sous-espèce — souvent rien : l'Effraie des clochers,
+        relevée en *Tyto alba delicatula*, sortait sans protection, et les
+        neuf sans liste rouge. Un taxon infraspécifique qu'aucun classeur ne
+        porte se lit donc comme son espèce, quand un classeur la porte. Celui
+        qu'un classeur porte garde sa propre ligne.
+        """
+        cd = str(cd_ref).strip()
+        if cd in self._par_cd or self.index is None:
+            return cd
+        espece = self.index.espece(cd)
+        return espece if espece and espece in self._par_cd else cd
+
+    def _fiche(self, cd_ref: str) -> _Fiche | None:
+        return self._par_cd.get(self.lu_comme(cd_ref))
 
     def groupe_classeur(self, cd_ref: str) -> str:
         """Nom du classeur qui porte ce taxon — « macroheteroceres »…
@@ -139,7 +163,7 @@ class Reference:
         eux, les séparent — c'est la règle posée en octobre 2026, le classeur
         fait foi.
         """
-        fiche = self._par_cd.get(str(cd_ref).strip())
+        fiche = self._fiche(cd_ref)
         return fiche.classeur.groupe if fiche is not None else ""
 
     def connait(self, cd_ref: str) -> bool:
@@ -150,7 +174,7 @@ class Reference:
         vide parce que le statut n'existe pas. Le premier cas se signale, le
         second non.
         """
-        return str(cd_ref).strip() in self._par_cd
+        return self._fiche(cd_ref) is not None
 
     def interroge(self, cd_ref: str, type_statut: str,
                   territoire: str) -> bool:
@@ -168,7 +192,7 @@ class Reference:
         celui de la flore non, et c'est bien celui qui porte la plante qui
         décide pour elle.
         """
-        fiche = self._par_cd.get(str(cd_ref).strip())
+        fiche = self._fiche(cd_ref)
         if fiche is None:
             return False
         return any(_correspond(colonne, type_statut, territoire)
@@ -191,7 +215,7 @@ class Reference:
         Une case vide ne donne pas d'entrée : c'est bien l'absence de statut,
         et non un statut vide, qu'il faut rendre.
         """
-        fiche = self._par_cd.get(str(cd_ref).strip())
+        fiche = self._fiche(cd_ref)
         if fiche is None:
             return []
         trouvees: list[bdc.Entree] = []
@@ -328,13 +352,35 @@ class AvecRepli:
         return (self.reference.couvre(type_statut, territoire)
                 or self._repli(type_statut).couvre(type_statut, territoire))
 
+    def _candidats(self, cd_ref: str) -> list[str]:
+        """À qui demander, quand BDC répond pour un taxon lu comme son espèce.
+
+        Au taxon d'abord : une liste peut nommer la sous-espèce. À l'espèce
+        ensuite, que les classeurs portent et dont BDC parle le plus souvent.
+        """
+        lu = self.reference.lu_comme(cd_ref)
+        return [cd_ref] if lu == cd_ref else [cd_ref, lu]
+
     def entrees(self, cd_ref: str, type_statut: str,
                 territoire: str) -> list[bdc.Entree]:
         source = self._source(cd_ref, type_statut, territoire)
-        return source.entrees(cd_ref, type_statut, territoire)
+        if source is self.reference:
+            return source.entrees(cd_ref, type_statut, territoire)
+        for cd in self._candidats(cd_ref):
+            trouvees = source.entrees(cd, type_statut, territoire)
+            if trouvees:
+                return trouvees
+        return []
 
     def rendu(self, cd_ref: str, type_statut: str, territoire: str,
               periode: str | None = None,
               filtre: tuple[str, ...] | None = None) -> str:
         source = self._source(cd_ref, type_statut, territoire)
-        return source.rendu(cd_ref, type_statut, territoire, periode, filtre)
+        if source is self.reference:
+            return source.rendu(cd_ref, type_statut, territoire, periode,
+                                filtre)
+        for cd in self._candidats(cd_ref):
+            rendu = source.rendu(cd, type_statut, territoire, periode, filtre)
+            if rendu:
+                return rendu
+        return ""

@@ -607,6 +607,43 @@ def _absence_de_reference(contexte, jeu, retenues: list, statuts=None) -> str:
     )
 
 
+def _lus_a_l_espece(contexte, retenues: list) -> list[tuple[str, str]]:
+    """(taxon, espèce) pour chaque taxon que les classeurs lisent à l'espèce.
+
+    Voir `reference.Reference.lu_comme`. Les noms sont ceux du tableau : le
+    nom scientifique de TaxRef, sous-espèce comprise.
+    """
+    reference = getattr(contexte, "reference", None)
+    if reference is None or not hasattr(reference, "lu_comme"):
+        return []
+    taxons = contexte.index.taxons
+    paires = []
+    for espece in retenues:
+        lu = reference.lu_comme(espece.cd_ref)
+        if lu == str(espece.cd_ref).strip():
+            continue
+        taxon, parent = taxons.get(espece.cd_ref), taxons.get(lu)
+        paires.append(((taxon.lb_nom if taxon else "") or espece.nom_scientifique,
+                       parent.lb_nom if parent else lu))
+    return paires
+
+
+def _phrase_lus_a_l_espece(paires: list[tuple[str, str]]) -> str:
+    """Ce qu'il faut dire des taxons dont les statuts sont ceux de l'espèce."""
+    if not paires:
+        return ""
+    noms = [f"{taxon} ({espece})" for taxon, espece in
+            sorted(paires, key=lambda p: cle_alphabetique(p[0]))]
+    if len(paires) == 1:
+        return ("1 taxon relevé sous le rang d'espèce ne figure pas dans les "
+                "classeurs de référence d'UNITe, qui portent son espèce : ses "
+                f"statuts sont ceux de l'espèce — {noms[0]}.")
+    return (f"{len(paires)} taxons relevés sous le rang d'espèce ne figurent "
+            "pas dans les classeurs de référence d'UNITe, qui portent leur "
+            "espèce : leurs statuts sont ceux de l'espèce — "
+            f"{_enumerer(noms)}.")
+
+
 #: Au-delà, une condition de déterminance ZNIEFF quitte le tableau pour une
 #: liste dessous. La colonne fait 2,3 cm : « Oui (MC, SO) » y tient, mais les
 #: listes donnent jusqu'à 261 caractères pour un oiseau d'Auvergne-Rhône-Alpes
@@ -715,6 +752,9 @@ def _tableau_especes(rapport: Rapport, projet: Projet, contexte,
     avertissement = _absence_de_reference(contexte, jeu, retenues, statuts)
     if avertissement:
         rapport.para(avertissement)
+    lus = _phrase_lus_a_l_espece(_lus_a_l_espece(contexte, retenues))
+    if lus:
+        rapport.para(lus)
     repliees = _colonnes_repliees(contexte, jeu, retenues)
     if repliees:
         version = getattr(contexte.versions.get("bdc_statuts"), "version", "")
@@ -1054,8 +1094,29 @@ def _compter_par_famille_etude(resultat, contexte,
     return {k: (v[0], v[1]) for k, v in comptes.items()}
 
 
-def _dynamique_du_site(rapport: Rapport) -> None:
+#: Les planches de photographies aériennes, dans l'ordre du document : la
+#: comparaison se lit d'hier à aujourd'hui.
+FAMILLES_PHOTOGRAPHIES = ("ortho_1950", "ortho_actuelle")
+
+
+def _dynamique_du_site(rapport: Rapport, photographies: list) -> None:
+    """Les photographies d'hier et d'aujourd'hui, puis ce qu'on en tire.
+
+    Les montrer revient à l'outil ; lire l'évolution des milieux — un
+    boisement spontané, une prairie retournée, une haie arrachée — revient à
+    l'experte. Sans planche, la consigne seule reste, comme avant le
+    8 novembre 2026.
+    """
     rapport.partie("Dynamique du site")
+    if photographies:
+        rapport.para(
+            "Les photographies aériennes de l'IGN montrent la zone "
+            "d'implantation potentielle et son aire d'étude immédiate dans les "
+            "années 1950-1965, puis sur la prise de vue la plus récente."
+        )
+        for carte in photographies:
+            rapport.carte(carte.chemin, f"{carte.titre} de la zone "
+                                        "d'implantation potentielle")
     rapport.a_completer(
         "comparer l'occupation du sol actuelle à celle des années 1950 "
         "(photographies aériennes de l'IGN) et en tirer la dynamique des "
@@ -1233,6 +1294,8 @@ def ecrire(chemin: Path, projet: Projet, *, resultat_zonages=None,
     cartes = list(cartes or [])
     par_famille = {c.famille: c for c in cartes}
     situation = par_famille.pop("aires", None)
+    photographies = [par_famille.pop(f) for f in FAMILLES_PHOTOGRAPHIES
+                     if f in par_famille]
 
     _page_de_garde(rapport, projet)
     rapport.sommaire()
@@ -1242,11 +1305,18 @@ def ecrire(chemin: Path, projet: Projet, *, resultat_zonages=None,
     _etat_initial(rapport, projet, resultat_zonages, par_famille,
                   resultat_especes, contexte,
                   _especes_a_pna(resultat_especes, contexte))
-    _dynamique_du_site(rapport)
+    _dynamique_du_site(rapport, photographies)
     _trame_verte_et_bleue(rapport)
     _annexes(rapport, projet, resultat_especes, contexte)
 
     lignes_sources = list(citations or [])
+    # Les photographies sont lues au rendu des planches, non figées comme les
+    # référentiels : la date est celle de ce rendu.
+    for carte in photographies:
+        if carte.fond:
+            lignes_sources.append(
+                carte.fond + (f", consultées le {carte.date}" if carte.date
+                              else ""))
     for source in getattr(resultat_zonages, "sources_locales", []) or []:
         lignes_sources.append(f"{source.type_libelle} : {source.citation}")
     if resultat_especes is not None and resultat_especes.especes:

@@ -155,7 +155,7 @@ def charger_contexte(racine: Path, forcer: bool = False,
         cs = charger_classeurs(racine)
     except Exception:  # noqa: BLE001
         cs = {}
-    ref = reference_mod.Reference(cs) if cs else None
+    ref = reference_mod.Reference(cs, index=index) if cs else None
     if ref is not None:
         tenus = [c for cle, c in cs.items() if cle not in GROUPES_HORS_VEILLE]
         citations.append(
