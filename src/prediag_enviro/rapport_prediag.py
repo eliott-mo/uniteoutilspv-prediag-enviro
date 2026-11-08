@@ -353,6 +353,16 @@ def _legende_aires(projet: Projet) -> str:
 #     Annexes            listes d'espèces par groupe
 #     Bibliographie
 
+#: Ce que localise la carte de chaque famille, dans « Localisation des … ».
+#: L'intitulé de la famille passé en minuscules donnait « des natura 2000 ».
+LEGENDES_CARTES = {
+    "inventaire": "zonages d'inventaire",
+    "natura2000": "sites Natura 2000",
+    "autres": "autres zonages du patrimoine naturel",
+    "compensation": "mesures compensatoires prescrites",
+    "zones_humides": "zones humides et tourbières de la BCAE 2",
+}
+
 #: Intitulés de l'état initial pour chaque famille de zonages, repris du
 #: document externe — ils ne sont pas ceux du registre interne.
 TITRES_ZONAGES = {
@@ -817,10 +827,12 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
             )
             carte = cartes_par_famille.get(famille)
             if carte is not None:
+                objet = LEGENDES_CARTES.get(
+                    famille, titre_interne.split("—")[0].strip().lower())
                 rapport.carte(
                     carte.chemin,
-                    f"Localisation des {titre_interne.split('—')[0].strip().lower()} "
-                    f"jusqu'à {_rayon_aer(projet)} autour de la ZIP")
+                    f"Localisation des {objet} jusqu'à {_rayon_aer(projet)} "
+                    "autour de la ZIP")
             # Les zonages sans source nationale fiable — les ENS en tête — se
             # rangent dans cette famille. Le lecteur doit savoir si la rubrique
             # est vide faute de zonage ou faute de recherche.
@@ -1094,13 +1106,20 @@ def _compter_par_famille_etude(resultat, contexte,
     return {k: (v[0], v[1]) for k, v in comptes.items()}
 
 
-#: Les planches de photographies aériennes, dans l'ordre du document : la
-#: comparaison se lit d'hier à aujourd'hui.
-FAMILLES_PHOTOGRAPHIES = ("ortho_1950", "ortho_actuelle")
+#: Les planches de photographies aériennes, dans l'ordre du document — la
+#: série, puis la plus récente en pleine page —, et leur légende.
+LEGENDES_PHOTOGRAPHIES = {
+    "ortho_evolution": ("Évolution de l'occupation du sol de la zone "
+                        "d'implantation potentielle, de 1950-1965 à la prise "
+                        "de vue la plus récente"),
+    "ortho_actuelle": ("Photographie aérienne la plus récente de la zone "
+                       "d'implantation potentielle"),
+}
+FAMILLES_PHOTOGRAPHIES = tuple(LEGENDES_PHOTOGRAPHIES)
 
 
 def _dynamique_du_site(rapport: Rapport, photographies: list) -> None:
-    """Les photographies d'hier et d'aujourd'hui, puis ce qu'on en tire.
+    """Les photographies d'hier à aujourd'hui, puis ce qu'on en tire.
 
     Les montrer revient à l'outil ; lire l'évolution des milieux — un
     boisement spontané, une prairie retournée, une haie arrachée — revient à
@@ -1109,14 +1128,18 @@ def _dynamique_du_site(rapport: Rapport, photographies: list) -> None:
     """
     rapport.partie("Dynamique du site")
     if photographies:
-        rapport.para(
-            "Les photographies aériennes de l'IGN montrent la zone "
-            "d'implantation potentielle et son aire d'étude immédiate dans les "
-            "années 1950-1965, puis sur la prise de vue la plus récente."
-        )
+        phrase = ("Les photographies aériennes de l'IGN montrent la zone "
+                  "d'implantation potentielle et son aire d'étude immédiate de "
+                  "1950-1965 à aujourd'hui.")
+        absentes = [p for carte in photographies
+                    for p in getattr(carte, "absentes", ())]
+        if absentes:
+            phrase += (f" L'IGN n'a pas de prise de vue de "
+                       f"{_enumerer(absentes)} sur ce secteur.")
+        rapport.para(phrase)
         for carte in photographies:
-            rapport.carte(carte.chemin, f"{carte.titre} de la zone "
-                                        "d'implantation potentielle")
+            rapport.carte(carte.chemin, LEGENDES_PHOTOGRAPHIES.get(
+                carte.famille, carte.titre))
     rapport.a_completer(
         "comparer l'occupation du sol actuelle à celle des années 1950 "
         "(photographies aériennes de l'IGN) et en tirer la dynamique des "
@@ -1310,6 +1333,12 @@ def ecrire(chemin: Path, projet: Projet, *, resultat_zonages=None,
     _annexes(rapport, projet, resultat_especes, contexte)
 
     lignes_sources = list(citations or [])
+    # Le fond des cartes de situation et de zonages : l'interface l'ajoutait,
+    # un document produit hors d'elle ne le citait pas. Le dédoublonnage de la
+    # bibliographie absorbe la ligne quand l'interface l'écrit aussi.
+    if any(c.famille not in FAMILLES_PHOTOGRAPHIES for c in cartes):
+        from .cartes import FOND
+        lignes_sources.append(f"Fond de carte : {FOND['attribution']}")
     # Les photographies sont lues au rendu des planches, non figées comme les
     # référentiels : la date est celle de ce rendu.
     for carte in photographies:

@@ -275,9 +275,9 @@ Ce que l'outil écrit lui-même : les dénombrements (« dans l'aire d'étude
 rapprochée, on recense 5 ZNIEFF de type I et 1 ZNIEFF de type II »), les
 distances, l'appartenance aux aires d'étude, les statuts de chaque espèce lus
 dans les classeurs — et dans BDC-Statuts là où ils ne disent rien —, les
-plantes de la commune indicatrices de zones humides, les cartes — dont les
-photographies aériennes de la ZIP en 1950-1965 et aujourd'hui, pour la
-dynamique du site —, la numérotation des tableaux et des figures.
+plantes de la commune indicatrices de zones humides, les cartes — dont la
+série des photographies aériennes de la ZIP, de 1950-1965 à aujourd'hui, pour
+la dynamique du site —, la numérotation des tableaux et des figures.
 
 Ce qu'il laisse : tout jugement. Chaque trou est écrit en couleur et **formule
 sa consigne** — « indiquer lesquelles de ces espèces peuvent effectivement se
@@ -335,7 +335,7 @@ site de l'INPN est en reconstruction et les appels directs tombent.
 | **Mesures compensatoires** | Cerema, par la Géoplateforme | ce qui a déjà été compensé autour du projet |
 | **Zones humides (BCAE 2)** | ministère de l'Agriculture, par la Géoplateforme | zones humides et tourbières de la conditionnalité de la PAC |
 | **Orthoptères** | Sardet & Defaut 2004 | indice national de priorité et domaines biogéographiques, que BDC ne porte pas |
-| **Photographies aériennes** | IGN, par la Géoplateforme — lues au rendu des planches, datées de ce jour | 1950-1965 et prise de vue la plus récente, pour la dynamique du site |
+| **Photographies aériennes** | IGN, par la Géoplateforme — lues au rendu des planches, datées de ce jour | six périodes, de 1950-1965 à la prise de vue la plus récente, pour la dynamique du site ; une période que l'IGN ne couvre pas est dite sur la planche et dans le texte |
 
 Source des référentiels de l'INPN : Muséum national d'Histoire naturelle /
 PatriNat (OFB-MNHN-CNRS-IRD) — <https://inpn.mnhn.fr/referentiels-donnees>.

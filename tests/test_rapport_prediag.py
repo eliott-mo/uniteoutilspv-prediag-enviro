@@ -187,39 +187,80 @@ class FloreIndicatrice(unittest.TestCase):
             "(Arrêté 2008) ».")
 
 
+def _image(dossier, nom: str) -> Path:
+    from PIL import Image
+    chemin = Path(dossier) / nom
+    Image.new("RGB", (300, 200), "white").save(chemin)
+    return chemin
+
+
 class DynamiqueDuSite(unittest.TestCase):
-    """Les photographies aériennes d'hier et d'aujourd'hui, puis la consigne."""
+    """La série de photographies aériennes, la plus récente, puis la consigne."""
 
     SUIVANT = "Prise en compte de la Trame verte et bleue"
+    SERIE = ("Photographies aériennes 1950-1965, 1965-1980, 2000-2005, "
+             "2011-2015 et la plus récente — IGN, Géoplateforme")
 
     def test_avec_photographies(self):
-        from PIL import Image
-
         from prediag_enviro import cartes
         with tempfile.TemporaryDirectory() as dossier:
-            planches = []
-            for fond in (cartes.ORTHO_1950, cartes.ORTHO_ACTUELLE):
-                chemin = Path(dossier) / f"{fond['famille']}.png"
-                Image.new("RGB", (300, 200), "white").save(chemin)
-                planches.append(cartes.Carte(
-                    famille=fond["famille"], titre=fond["titre"],
-                    chemin=chemin, nb_zonages=0, fond=fond["attribution"],
-                    date="08/11/2026"))
+            planches = [
+                cartes.Carte(famille="ortho_evolution",
+                             titre="Évolution de l'occupation du sol",
+                             chemin=_image(dossier, "e.png"), nb_zonages=0,
+                             fond=self.SERIE, date="08/11/2026",
+                             absentes=("1980-1995",)),
+                cartes.Carte(famille="ortho_actuelle",
+                             titre=cartes.ORTHO_ACTUELLE["titre"],
+                             chemin=_image(dossier, "a.png"), nb_zonages=0,
+                             fond=cartes.ORTHO_ACTUELLE["attribution"],
+                             date="08/11/2026"),
+            ]
             paragraphes = _paragraphes(cartes=planches)
         texte = " ".join(_section(paragraphes, "Dynamique du site",
                                   self.SUIVANT))
-        self.assertIn("1950-1965", texte)
+        self.assertIn("Évolution de l'occupation du sol", texte)
         self.assertIn("Photographie aérienne la plus récente", texte)
+        self.assertIn("pas de prise de vue de 1980-1995 sur ce secteur", texte)
         self.assertIn("[À compléter — comparer l'occupation du sol", texte)
         bibliographie = paragraphes[paragraphes.index("Bibliographie"):]
-        self.assertIn(f"{cartes.ORTHO_1950['attribution']}, consultées le "
-                      "08/11/2026", bibliographie)
+        self.assertIn(f"{self.SERIE}, consultées le 08/11/2026", bibliographie)
 
     def test_sans_photographies(self):
         section = [p for p in _section(_paragraphes(), "Dynamique du site",
                                        self.SUIVANT) if p.strip()]
         self.assertEqual(len(section), 1)
         self.assertTrue(section[0].startswith("[À compléter — comparer"))
+
+
+class CartesDeZonages(unittest.TestCase):
+    """Les légendes des cartes de zonages, et la citation de leur fond."""
+
+    def _paragraphes(self):
+        from prediag_enviro import cartes
+        resultat = mod_zonages.Resultat(zonages=[mod_zonages.Zonage(
+            famille="natura2000", type="Zone Spéciale de Conservation",
+            identifiant="FR9101388", nom="Gorges de l'Orb", interet="",
+            distance_m=2400.0, aires=["AER"])])
+        with tempfile.TemporaryDirectory() as dossier:
+            carte = cartes.Carte(famille="natura2000",
+                                 titre="Natura 2000 — ZPS et ZSC",
+                                 chemin=_image(dossier, "n.png"), nb_zonages=1)
+            return _paragraphes(resultat, cartes=[carte])
+
+    def test_legende_natura2000(self):
+        # Le 8 novembre 2026, la carte 3 de Bédarieux s'intitulait
+        # « Localisation des natura 2000 jusqu'à 5 km autour de la ZIP ».
+        legendes = [p for p in self._paragraphes() if p.startswith("Carte ")]
+        self.assertIn("Carte 1 : Localisation des sites Natura 2000 jusqu'à "
+                      "5 km autour de la ZIP", legendes)
+
+    def test_fond_de_carte_en_bibliographie(self):
+        # L'interface l'ajoutait ; un document produit hors de l'interface ne
+        # citait pas le Plan IGN, sur lequel sont posées les cartes.
+        paragraphes = self._paragraphes()
+        bibliographie = paragraphes[paragraphes.index("Bibliographie"):]
+        self.assertIn("Fond de carte : Plan IGN — Géoplateforme", bibliographie)
 
 
 class LusALEspece(unittest.TestCase):
