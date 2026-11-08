@@ -275,7 +275,8 @@ Ce que l'outil écrit lui-même : les dénombrements (« dans l'aire d'étude
 rapprochée, on recense 5 ZNIEFF de type I et 1 ZNIEFF de type II »), les
 distances, l'appartenance aux aires d'étude, les statuts de chaque espèce lus
 dans les classeurs — et dans BDC-Statuts là où ils ne disent rien —, les
-cartes, la numérotation des tableaux et des figures.
+plantes de la commune indicatrices de zones humides, les cartes, la
+numérotation des tableaux et des figures.
 
 Ce qu'il laisse : tout jugement. Chaque trou est écrit en couleur et **formule
 sa consigne** — « indiquer lesquelles de ces espèces peuvent effectivement se
@@ -567,11 +568,19 @@ python -m unittest      # depuis la racine du dépôt, avec le Python de l'outil
 ```
 
 Le Python de l'outil est `%LOCALAPPDATA%\prediag-enviro\venv\Scripts\python.exe`.
-`tests/` couvre la condensation des remarques ZNIEFF de BDC-Statuts : vecteurs
-par zone d'Auvergne-Rhône-Alpes, remarques coupées à 255 caractères, listes de
-zones, domaines d'Occitanie, et les cases qu'en tirent deux listes d'un même
-territoire. Chaque cas porte sa remarque réelle : aucun référentiel n'est
-nécessaire. Les tests ne partent pas en production.
+`tests/` couvre :
+
+- la condensation des remarques ZNIEFF de BDC-Statuts : vecteurs par zone
+  d'Auvergne-Rhône-Alpes, remarques coupées à 255 caractères, listes de zones,
+  domaines d'Occitanie, et les cases qu'en tirent deux listes d'un même
+  territoire ;
+- la lecture de la colonne des zones humides du classeur de flore, et son
+  cache, sur un classeur de trois lignes fabriqué pour l'occasion ;
+- ce que le document écrit des zones humides et la phrase des PNA, vérifiés
+  dans un document réellement produit.
+
+Chaque cas porte sa donnée réelle ou un échantillon fabriqué : aucun
+référentiel n'est nécessaire. Les tests ne partent pas en production.
 
 ## Limites connues
 
@@ -588,13 +597,31 @@ nécessaire. Les tests ne partent pas en production.
   case vide y signifie « non renseigné dans BDC », non « non évalué ». BDC
   porte parfois une évaluation **mondiale** là où il n'a pas d'évaluation
   européenne ; elle n'est pas recopiée dans la colonne Europe.
-- **Les zones humides ne sont qu'en partie alimentées.** La couche des zones
-  humides et tourbières de la BCAE 2 est croisée depuis le 19 octobre 2026,
-  mais ce n'est pas l'inventaire des zones humides : son objet est agricole, et
-  sa couverture suit la délimitation menée région par région. Une aire d'étude
-  sans polygone ne prouve donc rien. Les sols et les prélocalisations
-  régionales restent à consulter, et la rubrique sort avec une consigne qui
-  les nomme.
+- **Les zones humides ne sont qu'en partie alimentées.** Deux indices sont
+  lus :
+  - **la couche des zones humides et tourbières de la BCAE 2**, croisée
+    depuis le 19 octobre 2026. Ce n'est pas l'inventaire des zones humides :
+    son objet est agricole, et sa couverture suit la délimitation menée région
+    par région. Une aire d'étude sans polygone ne prouve donc rien, et le
+    document le dit sous le tableau depuis le 8 novembre 2026 ; il écrivait
+    auparavant « Aucun zonage de cette nature n'est présent » ;
+  - **la flore indicatrice**, depuis le 8 novembre 2026 : les plantes de la
+    commune que la colonne « ZH (Arrêté 2008) » du classeur de flore marque
+    « oui », soit la liste de l'arrêté du 24 juin 2008 (annexe 2.1). C'est un
+    indice sur la commune, non sur la ZIP : la consigne demande de vérifier à
+    la visite si ces espèces y dominent la végétation.
+
+  Restent à consulter, et la rubrique les nomme : les sols, la
+  prélocalisation nationale des zones humides probables (PatriNat), les zones
+  à dominante humide du SDAGE et les inventaires locaux. **La prélocalisation
+  nationale n'est pas branchée.** Elle se télécharge par région sur l'INPN (13
+  archives, version du 1er avril 2023, raster à 5 m), mais les fichiers
+  répondaient en erreur 500 le 8 novembre 2026. Elle n'a pas de licence
+  nommée : la page de téléchargement renvoie aux conditions d'utilisation de
+  l'INPN, qui autorisent l'usage en citant le Muséum national d'Histoire
+  naturelle, sans dénaturer les données. Ses producteurs précisent qu'elle n'a
+  pas de portée réglementaire. Le WCS du RPDZH ne sert pas la carte seuillée
+  des zones humides probables, seulement la probabiliste.
 - **BDC-Statuts coupe certaines remarques à 255 caractères** : 385 lignes
   déterminantes, de six listes, dont 348 de celle d'Auvergne-Rhône-Alpes
   (2020). L'outil marque la coupure d'un « … », et le prédiagnostic l'explique

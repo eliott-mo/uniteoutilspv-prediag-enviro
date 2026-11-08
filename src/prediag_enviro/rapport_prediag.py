@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import chemins, statuts_especes as se, zonages as mod_zonages
+from . import chemins, flore, statuts_especes as se, zonages as mod_zonages
 from .sortie_word import Colonne, Rapport, colonnes_zonages
 from .taxref import cle_alphabetique, nom_vernaculaire
 
@@ -144,7 +144,28 @@ def _compter(zonages_retenus: list) -> list[tuple[str, int]]:
 
 # ═══════════════════════════════════════════════════════════ phrases de constat
 
-def _constat_famille(retenus: list, projet: Projet) -> list[str]:
+#: Ce qu'une rubrique vide écrit, quand « aucun zonage » dirait trop.
+AUCUN_ZONAGE = {
+    "zones_humides": "Aucune zone humide ni tourbière délimitée au titre de la "
+                     "BCAE 2 n'est présente dans les aires d'étude du projet.",
+}
+
+#: Ce que la couche de la BCAE 2 ne prouve pas. Le prédiagnostic de Bédarieux
+#: du 1er novembre 2026 écrivait « Aucun zonage de cette nature n'est
+#: présent » sous cette couche, sans rien de plus : la lecture « pas de zone
+#: humide » que `zonages._enrichir_zones_humides` voulait justement empêcher.
+NOTE_BCAE = (
+    "cette couche délimite les zones humides et tourbières que protège la "
+    "norme BCAE 2 de la politique agricole commune. Ce n'est pas un inventaire "
+    "des zones humides : sa couverture suit l'avancement de leur délimitation, "
+    "inégal d'une région à l'autre. L'absence de polygone ne vaut donc pas "
+    "absence de zone humide ; la rubrique « Zone humide » réunit les autres "
+    "indices."
+)
+
+
+def _constat_famille(retenus: list, projet: Projet,
+                     famille: str = "") -> list[str]:
     """Les phrases factuelles qui ouvrent une rubrique de zonages.
 
     Toutes sont du dénombrement ou de la mesure, donc toutes automatisables.
@@ -153,8 +174,9 @@ def _constat_famille(retenus: list, projet: Projet) -> list[str]:
     présentes » obligerait à connaître le genre de chaque type de zonage.
     """
     if not retenus:
-        return ["Aucun zonage de cette nature n'est présent dans les aires "
-                "d'étude du projet."]
+        return [AUCUN_ZONAGE.get(
+            famille, "Aucun zonage de cette nature n'est présent dans les "
+                     "aires d'étude du projet.")]
 
     phrases = []
     libelle_aer = projet.libelle_aire("AER", "aire d'étude rapprochée")
@@ -724,7 +746,7 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
         for famille, titre_interne in mod_zonages.FAMILLES:
             retenus = resultat_zonages.par_famille(famille)
             rapport.sous_sous_partie(TITRES_ZONAGES.get(famille, titre_interne))
-            for phrase in _constat_famille(retenus, projet):
+            for phrase in _constat_famille(retenus, projet, famille):
                 rapport.para(phrase)
             # Avant le `continue` : c'est justement quand le tableau est vide
             # que la mention compte le plus.
@@ -732,6 +754,8 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
                 mention = _mesures_non_localisees(resultat_zonages)
                 if mention:
                     rapport.para(mention)
+            if famille == "zones_humides":
+                rapport.note(NOTE_BCAE)
             if not retenus:
                 continue
             groupes = _groupes_tableau(retenus, ordre, observee)
@@ -766,19 +790,7 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
                     rapport.note(avertissement)
 
         rapport.sous_sous_partie("Plan National d'Actions (PNA)")
-        if especes_pna:
-            rapport.para(
-                f"{len(especes_pna)} espèce"
-                f"{'s' if len(especes_pna) > 1 else ''} recensée"
-                f"{'s' if len(especes_pna) > 1 else ''} sur la commune "
-                f"fait{'' if len(especes_pna) == 1 else 'nt'} l'objet d'un "
-                f"plan national d'actions : {_enumerer(especes_pna)}."
-            )
-        else:
-            rapport.para(
-                "Aucune des espèces recensées sur la commune ne fait l'objet "
-                "d'un plan national d'actions."
-            )
+        rapport.para(_phrase_pna(especes_pna))
         rapport.a_completer(
             "préciser les zonages de PNA qui recoupent les aires d'étude — "
             "l'outil ne lit que les espèces concernées, pas l'emprise "
@@ -799,20 +811,7 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
                 + ". Le constat ci-dessus est donc incomplet sur ces zonages."
             )
 
-    rapport.sous_partie("Zone humide")
-    rapport.a_completer(
-        "renseigner le type de sol de la ZIP et son caractère hydromorphe, "
-        "puis les potentialités de zones humides, d'après la carte des sols "
-        "(RRP du GIS Sol), les zones à dominante humide du SDAGE et les "
-        "inventaires portés par la DREAL et l'agence de l'eau"
-    )
-    rapport.sous_sous_partie("Consultations")
-    rapport.a_completer("citer les sources consultées et leur date")
-    rapport.note(
-        "cette rubrique n'est pas encore alimentée automatiquement : les "
-        "couches de sols et de milieux humides ne sont pas nationales et "
-        "relèvent de sources régionales, à brancher au cas par cas."
-    )
+    _zone_humide(rapport, projet, resultat_especes, contexte)
 
     comptes = _compter_par_famille_etude(resultat_especes, contexte,
                                          projet.departements)
@@ -858,6 +857,130 @@ def _etat_initial(rapport: Rapport, projet: Projet, resultat_zonages,
         rapport.sous_sous_partie("Consultations")
         rapport.a_completer("citer les sources consultées et leur date")
     rapport.orientation(paysage=avant)
+
+
+#: La liste que la rubrique « Zone humide » cite pour la flore.
+LISTE_ZH = ("liste des espèces indicatrices de zones humides (arrêté du "
+            "24 juin 2008 modifié, annexe 2.1)")
+
+#: Ce que la rubrique doit à l'outil, et ce qu'elle laisse. Elle disait
+#: depuis le 5 octobre 2026 n'être « pas encore alimentée automatiquement »,
+#: les couches de milieux humides n'étant « pas nationales » : la BCAE 2 est
+#: croisée depuis le 19 octobre, et une prélocalisation nationale existe
+#: depuis 2023.
+NOTE_ZONE_HUMIDE = (
+    "l'outil renseigne ici la flore indicatrice des sources déposées ; les "
+    "zones humides délimitées au titre de la BCAE 2 figurent avec les "
+    "zonages. Les sols, les prélocalisations et les inventaires de zones "
+    "humides ne sont pas lus : ils restent à consulter."
+)
+
+
+def _zone_humide(rapport: Rapport, projet: Projet, resultat_especes,
+                 contexte) -> None:
+    """La rubrique « Zone humide » : ce que l'outil sait dire, puis le reste."""
+    rapport.sous_partie("Zone humide")
+    plantes = _especes_par_groupe(resultat_especes, contexte).get("flore", [])
+    statuts = contexte.source_statuts if contexte is not None else None
+    index = contexte.index if contexte is not None else None
+    rapport.para(_flore_zone_humide(projet, plantes, statuts, index))
+    if _indicatrices_zh(plantes, statuts, index):
+        rapport.a_completer(
+            "vérifier sur la ZIP si ces espèces dominent la végétation : c'est "
+            "le critère de végétation de l'arrêté du 24 juin 2008"
+        )
+    rapport.a_completer(
+        "renseigner le type de sol de la ZIP et son caractère hydromorphe "
+        "d'après la carte des sols (RRP du GIS Sol), puis les potentialités de "
+        "zones humides d'après la prélocalisation nationale des zones humides "
+        "probables (PatriNat, sur l'INPN et le RPDZH), les zones à dominante "
+        "humide du SDAGE et les inventaires portés par la DREAL et l'agence de "
+        "l'eau"
+    )
+    rapport.sous_sous_partie("Consultations")
+    rapport.a_completer("citer les sources consultées et leur date")
+    rapport.note(NOTE_ZONE_HUMIDE)
+
+
+def _colonne_zh_lue(statuts) -> bool:
+    """Un classeur installé porte-t-il la colonne « ZH (Arrêté 2008) » ?"""
+    return statuts is not None and statuts.couvre(flore.TYPE_ZH,
+                                                  flore.TERRITOIRE_ZH)
+
+
+def _indicatrices_zh(plantes: list, statuts, index) -> list[str]:
+    """Les plantes que le classeur de flore marque « oui » en colonne ZH.
+
+    Le nom est celui des autres listes du document, le vernaculaire d'abord ;
+    deux taxons de même nom n'en font qu'un, pour que le décompte annoncé et
+    la liste qui le suit ne se contredisent pas.
+    """
+    if not plantes or not _colonne_zh_lue(statuts):
+        return []
+    noms: list[str] = []
+    for espece in plantes:
+        if not statuts.entrees(espece.cd_ref, flore.TYPE_ZH,
+                               flore.TERRITOIRE_ZH):
+            continue
+        taxon = index.taxons.get(espece.cd_ref) if index is not None else None
+        nom = nom_vernaculaire(
+            (taxon.nom_vern if taxon else "") or espece.nom_commun
+            or espece.nom_scientifique)
+        if nom and nom not in noms:
+            noms.append(nom)
+    return sorted(noms, key=cle_alphabetique)
+
+
+def _flore_zone_humide(projet: Projet, plantes: list, statuts, index) -> str:
+    """Les plantes de la commune que l'arrêté du 24 juin 2008 désigne.
+
+    Du comptage, donc l'affaire de l'outil : à Bédarieux, 66 des plantes
+    recensées sur la commune figurent sur la liste. Ce qu'elles disent de la
+    ZIP — y sont-elles, y dominent-elles la végétation — revient à la visite.
+
+    La phrase dit aussi quand la question n'a pas pu être posée : sans
+    plante déposée, ou sans la colonne du classeur, se taire laisserait lire
+    qu'aucune plante n'est indicatrice.
+    """
+    if not plantes:
+        return ("La flore indicatrice de zones humides n'a pas été recherchée "
+                ": aucune espèce de flore ne figure dans les sources déposées.")
+    if not _colonne_zh_lue(statuts):
+        return ("La flore indicatrice de zones humides n'a pas été recherchée "
+                ": aucun classeur de flore installé ne porte la colonne "
+                f"« {flore.ENTETE_ZH} ».")
+    noms = _indicatrices_zh(plantes, statuts, index)
+    communes = projet.libelle_communes
+    if len(plantes) == 1:
+        if noms:
+            return (f"La seule espèce de flore recensée sur {communes}, "
+                    f"{noms[0]}, figure sur la {LISTE_ZH}.")
+        return (f"La seule espèce de flore recensée sur {communes} ne figure "
+                f"pas sur la {LISTE_ZH}.")
+    if not noms:
+        return (f"Aucune des {len(plantes)} espèces de flore recensées sur "
+                f"{communes} ne figure sur la {LISTE_ZH}.")
+    return (f"Parmi les {len(plantes)} espèces de flore recensées sur "
+            f"{communes}, {len(noms)} figure{'nt' if len(noms) > 1 else ''} "
+            f"sur la {LISTE_ZH} : {_enumerer(noms)}.")
+
+
+def _phrase_pna(especes_pna: list[str]) -> str:
+    """Les espèces de la commune qu'un plan national d'actions concerne.
+
+    Le pluriel de « fait » n'est pas « faitnt » : le prédiagnostic de
+    Bédarieux du 1er novembre 2026 l'écrivait pour ses 39 espèces.
+    """
+    if especes_pna:
+        pluriel = len(especes_pna) > 1
+        return (
+            f"{len(especes_pna)} espèce{'s' if pluriel else ''} "
+            f"recensée{'s' if pluriel else ''} sur la commune "
+            f"{'font' if pluriel else 'fait'} l'objet d'un "
+            f"plan national d'actions : {_enumerer(especes_pna)}."
+        )
+    return ("Aucune des espèces recensées sur la commune ne fait l'objet "
+            "d'un plan national d'actions.")
 
 
 def _mesures_non_localisees(resultat_zonages) -> str:

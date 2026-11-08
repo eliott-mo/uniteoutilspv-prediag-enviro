@@ -29,11 +29,17 @@ l'arrêté.
 **Ce qu'il n'apporte pas.** Aucune colonne « déterminante ZNIEFF ». Ce n'est
 pas un silence de sa part, c'est une question qu'il ne pose pas — d'où
 `Reference.interroge()`, qui laisse BDC répondre là où le classeur n'a pas de
-colonne du tout. Les colonnes d'espèces exotiques envahissantes, de messicoles
-et de zones humides (arrêté du 24 juin 2008) sont lues mais pas exposées :
-aucun type de BDC-Statuts ne leur correspond, et aucune colonne du
-prédiagnostic ne les attend encore. La feuille `Sources` les documente, elles
-attendent la rubrique qui les emploiera.
+colonne du tout. Les colonnes d'espèces exotiques envahissantes et de
+messicoles ne sont pas exposées : aucun type de BDC-Statuts ne leur
+correspond, et aucune rubrique du prédiagnostic ne les attend encore.
+
+**La colonne des zones humides l'est depuis le 8 novembre 2026.** « ZH
+(Arrêté 2008) » marque « oui » les 807 taxons de la liste des espèces
+indicatrices de l'arrêté du 24 juin 2008 (annexe 2.1). Aucun type de BDC ne
+lui correspond non plus : elle prend le type `ZH`, que seule la rubrique
+« Zone humide » interroge. On la cherche à son en-tête, et non à son rang :
+elle est la dernière du classeur, la première à bouger quand une colonne
+s'ajoute avant elle.
 """
 from __future__ import annotations
 
@@ -64,6 +70,21 @@ COLONNES_NATIONALES: tuple[tuple[int, str, str, str, str], ...] = (
     (42, "LRE", "LRE", "Europe", "Liste rouge Europe"),
     (43, "LRN", "LRN", "France métropolitaine", "Liste rouge France"),
 )
+
+#: La colonne des espèces indicatrices de zones humides (arrêté du 24 juin
+#: 2008), reconnue à son en-tête. Type et territoire sont ceux qu'interroge
+#: la rubrique « Zone humide » du prédiagnostic.
+ENTETE_ZH = "ZH (Arrêté 2008)"
+TYPE_ZH = "ZH"
+TERRITOIRE_ZH = "France métropolitaine"
+
+#: Version du cache, à monter quand ce qu'on lit du classeur change. La
+#: signature du fichier n'y suffit pas : un cache écrit avant qu'on lise la
+#: colonne ZH a la même, et le reprendre rendait une flore sans aucune
+#: indicatrice — un silence qu'aucun message n'aurait signalé.
+#:
+#: 2 : la colonne des zones humides est lue (8 novembre 2026).
+FORMAT_CACHE = 2
 
 #: La feuille « Régions » numérote à partir de zéro là où openpyxl commence à
 #: un. Vérifié sur les quatre familles de colonnes : elle annonce la
@@ -98,14 +119,37 @@ def est_classeur_flore(chemin: Path) -> bool:
         wb.close()
 
 
+def _colonne_zh(wb) -> ColonneStatut | None:
+    """La colonne « ZH (Arrêté 2008) », trouvée à son en-tête."""
+    entete = next(wb[ONGLET_STATUTS].iter_rows(min_row=1, max_row=1,
+                                               values_only=True), ())
+    for numero, valeur in enumerate(entete, start=1):
+        texte = str(valeur or "").strip()
+        if texte.upper().startswith(TYPE_ZH):
+            return ColonneStatut(
+                index=numero, champ=texte, type_bdc=TYPE_ZH,
+                territoire=TERRITOIRE_ZH, territoire_bdc=TERRITOIRE_ZH,
+                libelle="Espèce indicatrice de zones humides (arrêté du "
+                        "24 juin 2008)")
+    return None
+
+
 def _colonnes(wb) -> tuple[list[ColonneStatut], list[str]]:
-    """Les colonnes exposées : les quatre nationales, puis les régionales."""
+    """Les colonnes exposées : les nationales, puis les régionales."""
     colonnes = [
         ColonneStatut(index=i, champ=champ, type_bdc=type_bdc,
                       territoire=terr, territoire_bdc=terr, libelle=libelle)
         for i, champ, type_bdc, terr, libelle in COLONNES_NATIONALES
     ]
     avertissements: list[str] = []
+    zh = _colonne_zh(wb)
+    if zh is not None:
+        colonnes.append(zh)
+    else:
+        avertissements.append(
+            f"Le classeur de flore n'a pas de colonne « {ENTETE_ZH} » : la "
+            "flore indicatrice de zones humides n'est pas lue."
+        )
     if ONGLET_REGIONS not in wb.sheetnames:
         avertissements.append(
             f"Le classeur de flore n'a pas de feuille « {ONGLET_REGIONS} » : "
@@ -215,7 +259,7 @@ def lire(chemin: Path, groupe: str = "flore",
     taille du fichier et sa date, comme pour les index TaxRef et BDC.
     """
     etat = chemin.stat()
-    signature = f"{etat.st_size}-{int(etat.st_mtime)}"
+    signature = f"{FORMAT_CACHE}-{etat.st_size}-{int(etat.st_mtime)}"
     if cache is not None and cache.exists():
         try:
             garde = pickle.loads(cache.read_bytes())
