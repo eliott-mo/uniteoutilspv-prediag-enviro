@@ -23,6 +23,7 @@ import tempfile
 from datetime import date
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import streamlit as st
@@ -42,6 +43,7 @@ from prediag_enviro import extraits as mod_extraits  # noqa: E402
 from prediag_enviro import chemins  # noqa: E402
 from prediag_enviro import sources_locales as mod_sources  # noqa: E402
 from prediag_enviro import rapport_prediag as mod_prediag  # noqa: E402
+from prediag_enviro import coupes as mod_coupes  # noqa: E402
 from prediag_enviro.memoire import ACCEPTE, A_REVOIR, DECISIONS, REFUSE  # noqa: E402
 
 #: Le picto de l'outil, devant son titre et dans l'onglet du navigateur : les
@@ -681,8 +683,15 @@ with onglet_b:
                     _deposer(depot_emprise)
                 )
                 st.session_state.empreinte_emprise = empreinte
-                # Le découpage portait sur l'emprise précédente.
+                # Le découpage et les coupes portaient sur l'emprise précédente,
+                # et le choix des coupes aussi : la « libre_1 » d'un autre site
+                # serait sinon cochée d'avance.
                 st.session_state.pop("decoupage", None)
+                st.session_state.pop("coupes", None)
+                st.session_state.pop("livrables_coupes", None)
+                for cle in [k for k in st.session_state
+                            if str(k).startswith("retenir_")]:
+                    del st.session_state[cle]
             except Exception as erreur:  # noqa: BLE001
                 st.session_state.pop("emprise", None)
                 st.session_state.pop("empreinte_emprise", None)
@@ -891,8 +900,170 @@ with onglet_b:
                     "d'OpenStreetMap refuse l'usage automatisé : sa politique "
                     "l'interdit, et on ne la contourne pas."
                 )
+
         st.divider()
-        st.subheader("5 · Sources d'espèces")
+        st.subheader("5 · Coupes topographiques")
+        st.caption(
+            "Le relief autour de la ZIP, sur huit coupes : quatre directions, "
+            "de 4 et de 10 km, avec les boisements, les cours d'eau, les routes "
+            "principales et les lieux habités qu'elles croisent (RGE ALTI et "
+            "BD TOPO de l'IGN). Cochez celles qui ont du sens pour le site — "
+            "une à trois : elles iront dans le prédiagnostic, les huit restent "
+            "dans le PDF. Une coupe vers un hameau ou un point de vue s'ajoute "
+            "en dessous."
+        )
+        nom_site = ", ".join(c.nom for c in decoupage.retenues) or "Zone d'étude"
+        col_su, col_calcul = st.columns([2, 1], gap="large")
+        with col_su:
+            depot_su = st.file_uploader(
+                "Surface utile (facultatif)", type=["zip", "kml", "geojson", "json"],
+                key="depot_surface_utile",
+                help="Pour une demande de compléments : la surface des panneaux "
+                     "se dessine alors en rouge sur la ZIP. Au stade du "
+                     "prédiagnostic, la ZIP suffit.",
+            )
+        with col_calcul:
+            st.write("")
+            calculer = st.button("Calculer les coupes", width="stretch",
+                                 key="btn_coupes")
+        if calculer:
+            with st.spinner("Relief et couches de l'IGN, puis rendu des huit "
+                            "coupes… (une vingtaine de secondes la première "
+                            "fois, quelques-unes ensuite)"):
+                try:
+                    surface_utile = None
+                    if depot_su is not None:
+                        surface_utile = mod_communes.charger_emprise(
+                            _deposer(depot_su)).union
+                    etude = mod_coupes.etudier(
+                        emprise.union, surface_utile,
+                        cache=chemins.cache_coupes(),
+                        source_emprise=emprise.source.name)
+                    st.session_state.coupes = etude
+                    st.session_state.livrables_coupes = mod_coupes.produire(
+                        etude, _dossier_travail() / "coupes", site=nom_site)
+                except mod_coupes.ErreurIGN as erreur:
+                    st.error(f"Coupes non produites. {erreur}")
+                except Exception as erreur:  # noqa: BLE001
+                    st.error(f"Coupes impossibles : {erreur}")
+
+        etude_coupes = st.session_state.get("coupes")
+        livrables_coupes = st.session_state.get("livrables_coupes")
+        if etude_coupes is not None and livrables_coupes is not None:
+            haut_bas = etude_coupes.altitudes_emprise()
+            if haut_bas:
+                st.caption(f"ZIP entre {haut_bas[0]:.0f} et {haut_bas[1]:.0f} m "
+                           "d'altitude (NGF).")
+            col_plan, col_tel = st.columns([3, 1], gap="large")
+            with col_plan:
+                st.image(str(livrables_coupes.plan), width="stretch")
+            with col_tel:
+                if st.button("Agrandir le plan", width="stretch",
+                             key="zoom_plan_coupes"):
+                    _agrandir(SimpleNamespace(
+                        famille="plan_coupes", nb_zonages=0,
+                        titre="Plan de repérage des coupes",
+                        chemin=livrables_coupes.plan))
+                st.download_button(
+                    "⬇️ Les coupes en PDF", livrables_coupes.pdf.read_bytes(),
+                    file_name=livrables_coupes.pdf.name, mime="application/pdf",
+                    width="stretch", key="tel_pdf_coupes")
+                st.download_button(
+                    "⬇️ Leurs données en JSON", livrables_coupes.json.read_bytes(),
+                    file_name=livrables_coupes.json.name,
+                    mime="application/json", width="stretch",
+                    key="tel_json_coupes")
+
+            # Une ligne par longueur, puis les coupes libres : la vignette
+            # suffit à juger du relief, « Agrandir » sert à lire les noms.
+            rangees: dict[str, list] = {}
+            for c in etude_coupes.coupes:
+                cle = (f"{c.demi_longueur * 2 / 1000:.0f} km" if c.demi_longueur
+                       else "libres")
+                rangees.setdefault(cle, []).append(c)
+            for coupes_rangee in rangees.values():
+                for colonne, c in zip(st.columns(4), coupes_rangee):
+                    with colonne:
+                        image = livrables_coupes.coupes.get(c.identifiant)
+                        if image is None:
+                            continue
+                        st.image(str(image), width="stretch")
+                        st.checkbox(
+                            f"{c.nom}, {mod_coupes.en_km(c.longueur)} km",
+                            key=f"retenir_{c.identifiant}",
+                            help="Cochée : la coupe va dans le prédiagnostic.")
+                        if st.button("Agrandir", width="stretch",
+                                     key=f"zoom_coupe_{c.identifiant}"):
+                            _agrandir(SimpleNamespace(
+                                famille=c.identifiant, nb_zonages=0,
+                                titre=f"Coupe {c.nom}", chemin=image))
+            retenues = [c for c in etude_coupes.coupes
+                        if st.session_state.get(f"retenir_{c.identifiant}")]
+            if len(retenues) > 3:
+                st.warning(
+                    f"{len(retenues)} coupes retenues : au-delà de trois, le "
+                    "document s'alourdit sans rien dire de plus. Les autres "
+                    "restent dans le PDF.")
+
+            st.markdown("**Coupe vers un lieu**")
+            lieux = mod_coupes.lieux_proches(etude_coupes)
+            col_lieu, col_ajout_lieu = st.columns([3, 1], gap="large")
+            with col_lieu:
+                lieu = st.selectbox(
+                    "Lieu habité", lieux, index=None, key="lieu_coupe",
+                    format_func=lambda x: x.libelle,
+                    placeholder="Choisir un hameau, du plus proche au plus "
+                                "lointain…",
+                    help="La coupe part du lieu, traverse la ZIP et la "
+                         "dépasse d'un kilomètre : ce qu'on verrait de là-bas, "
+                         "et ce qui se dresse derrière.")
+            with col_ajout_lieu:
+                st.write("")
+                ajouter_lieu = st.button("Ajouter la coupe", width="stretch",
+                                         key="btn_coupe_lieu",
+                                         disabled=lieu is None)
+            with st.expander("Un point de vue qui n'est pas un lieu habité"):
+                col_coord, col_nom, col_ajout_pdv = st.columns([2, 2, 1])
+                with col_coord:
+                    coordonnees = st.text_input(
+                        "Latitude, longitude", key="coordonnees_pdv",
+                        placeholder="43.6123, 3.1654",
+                        help="Clic droit sur le Géoportail : « Adresse / "
+                             "coordonnées du lieu », en degrés décimaux.")
+                with col_nom:
+                    nom_pdv = st.text_input("Nom", value="Point de vue",
+                                            key="nom_pdv")
+                with col_ajout_pdv:
+                    st.write("")
+                    ajouter_pdv = st.button("Ajouter", width="stretch",
+                                            key="btn_coupe_pdv",
+                                            disabled=not coordonnees.strip())
+            depart = None
+            if ajouter_lieu and lieu is not None:
+                depart = (lieu.point, lieu.nom)
+            elif ajouter_pdv:
+                try:
+                    depart = (mod_coupes.point_l93(coordonnees),
+                              nom_pdv.strip() or "Point de vue")
+                except ValueError as erreur:
+                    st.error(str(erreur))
+            if depart is not None:
+                with st.spinner("Profil de la coupe, puis rendu…"):
+                    try:
+                        libre = mod_coupes.ajouter_coupe_libre(etude_coupes, *depart)
+                        st.session_state.livrables_coupes = mod_coupes.produire(
+                            etude_coupes, _dossier_travail() / "coupes",
+                            site=nom_site)
+                        # Ajoutée exprès : elle est retenue d'office.
+                        st.session_state[f"retenir_{libre.identifiant}"] = True
+                        st.rerun()
+                    except mod_coupes.ErreurIGN as erreur:
+                        st.error(f"Coupe non produite. {erreur}")
+                    except ValueError as erreur:
+                        st.error(str(erreur))
+
+        st.divider()
+        st.subheader("6 · Sources d'espèces")
         st.caption(
             "Ce qu'on attend ici est la **liste des espèces** présentes, et "
             "elle seule : leurs statuts sont lus automatiquement dans "
@@ -956,7 +1127,7 @@ with onglet_b:
         resultat = st.session_state.get("recoupement")
         if resultat is not None:
             st.divider()
-            st.subheader("6 · Liste recoupée")
+            st.subheader("7 · Liste recoupée")
             st.caption(
                 "Vos sources fondues en une liste unique, dédoublonnée par "
                 "taxon. Les noms que TaxRef n'a pas reconnus sont isolés plus "
@@ -1023,11 +1194,12 @@ with onglet_b:
                     )
 
         st.divider()
-        st.subheader("7 · Prédiagnostic")
+        st.subheader("8 · Prédiagnostic")
         st.caption(
             "Le document complet, dans la forme du prédiagnostic interne : "
             "page de garde, sommaires, zone d'étude, patrimoine naturel, zones "
-            "humides, espèces par groupe et conclusion. Il reprend l'en-tête, "
+            "humides, espèces par groupe, dynamique du site, coupes "
+            "topographiques et conclusion. Il reprend l'en-tête, "
             "le pied de page paginé et les styles du modèle UNITe. Ce que "
             "l'outil sait établir y est écrit — dénombrements, distances, "
             "statuts, cartes ; ce qui relève de l'expertise est laissé en "
@@ -1037,9 +1209,13 @@ with onglet_b:
         resultat_especes = st.session_state.get("recoupement")
         resultat_zonages = st.session_state.get("zonages")
         cartes_produites = st.session_state.get("cartes") or []
+        etude_coupes = st.session_state.get("coupes")
+        coupes_retenues = [
+            c.identifiant for c in (etude_coupes.coupes if etude_coupes else [])
+            if st.session_state.get(f"retenir_{c.identifiant}")]
 
         # Ce qui manque est nommé côté **document**, pas côté outil : savoir
-        # que « la section 5 est vide » n'aide pas, savoir que les volets
+        # que « la section 6 est vide » n'aide pas, savoir que les volets
         # Avifaune, Chiroptères et Autre faune sortiront sans tableau, si. Et
         # c'est un avertissement, pas une légende : en petit texte gris, la
         # remarque passait inaperçue et le manque se découvrait dans Word.
@@ -1049,10 +1225,15 @@ with onglet_b:
                            "carte (section 4)")
         elif not cartes_produites:
             manques.append("les cartes (section 4)")
+        if etude_coupes is None:
+            manques.append("les coupes topographiques (section 5)")
+        elif not coupes_retenues:
+            manques.append("le choix des coupes topographiques : aucune n'est "
+                           "cochée (section 5)")
         if resultat_especes is None or not resultat_especes.especes:
             manques.append("les espèces : les volets Avifaune, Chiroptères et "
                            "Autre faune de l'état initial, ainsi que les "
-                           "annexes, sortiront sans tableau (section 5)")
+                           "annexes, sortiront sans tableau (section 6)")
         if manques:
             # « Il manque encore » plutôt que « à la place de » : les éléments
             # commencent par leur article, et « à la place de les espèces »
@@ -1107,6 +1288,13 @@ with onglet_b:
             )
             sortie = _dossier_travail() / f"Prediag_{_nom_fichier(nom_projet)}.docx"
             with st.spinner("Assemblage du document…"):
+                # Les coupes retenues sont redessinées à la taille d'une page
+                # A4 couchée, avec un plan qui ne montre qu'elles.
+                coupes_document = None
+                if etude_coupes is not None and coupes_retenues:
+                    coupes_document = mod_coupes.pour_le_document(
+                        etude_coupes, coupes_retenues,
+                        _dossier_travail() / "coupes_document", site=nom_projet)
                 _, recrees = mod_prediag.ecrire(
                     sortie, projet,
                     resultat_zonages=resultat_zonages,
@@ -1115,6 +1303,7 @@ with onglet_b:
                     contexte=contexte,
                     citations=citations,
                     modele=chemin_modele,
+                    coupes=coupes_document,
                 )
             if recrees:
                 st.warning(

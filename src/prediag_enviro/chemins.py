@@ -80,6 +80,15 @@ def memoire() -> Path:
     return racine_donnees() / "memoire"
 
 
+def cache_coupes() -> Path:
+    """Les couches BD TOPO et les profils RGE ALTI déjà lus, par site.
+
+    Sur la machine : une dizaine de mégaoctets par site, qu'un second rendu
+    relit sans réseau.
+    """
+    return racine_donnees() / "cache_coupes"
+
+
 def alias() -> Path:
     """Dictionnaire d'alias — partagé, à côté de l'application.
 

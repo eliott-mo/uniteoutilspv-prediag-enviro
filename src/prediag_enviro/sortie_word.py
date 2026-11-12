@@ -378,6 +378,7 @@ class Rapport:
         self.styles_recrees = self._assurer_styles()
         self._n_tableau = 0
         self._n_carte = 0
+        self._n_figure = 0
         #: Orientation courante. Le modèle est en portrait.
         self._paysage = False
 
@@ -523,7 +524,7 @@ class Rapport:
             self._style(paragraphe, STYLE_PARTIE)
 
     def sommaire(self, avec_tableaux: bool = True,
-                 avec_cartes: bool = True) -> None:
+                 avec_cartes: bool = True, avec_figures: bool = False) -> None:
         """Sommaire des parties, puis des tableaux et des cartes.
 
         Les trois sont des champs : Word les remplit à l'ouverture, parce que
@@ -551,6 +552,14 @@ class Rapport:
             self._titre_sommaire("Sommaire des cartes")
             paragraphe = self.document.add_paragraph()
             _champ(paragraphe, r' TOC \h \z \c "Carte" ', consigne,
+                   recalculer=True)
+
+        # Les figures n'existent que si des coupes topographiques ont été
+        # retenues : un sommaire vide ne dirait rien à personne.
+        if avec_figures:
+            self._titre_sommaire("Sommaire des figures")
+            paragraphe = self.document.add_paragraph()
+            _champ(paragraphe, r' TOC \h \z \c "Figure" ', consigne,
                    recalculer=True)
 
         self.saut_de_page()
@@ -861,6 +870,22 @@ class Rapport:
         document ensuite.
         """
         self._n_carte += 1
+        self._illustration(chemin, "Carte", self._n_carte, legende, largeur_cm,
+                           paysage)
+        return self._n_carte
+
+    def figure(self, chemin: Path, legende: str = "",
+               largeur_cm: float | None = None, paysage: bool = True) -> int:
+        """Une figure qui n'est pas une carte — une coupe topographique —,
+        légendée « Figure n » et listée dans son propre sommaire."""
+        self._n_figure += 1
+        self._illustration(chemin, "Figure", self._n_figure, legende, largeur_cm,
+                           paysage)
+        return self._n_figure
+
+    def _illustration(self, chemin: Path, etiquette: str, numero: int,
+                      legende: str, largeur_cm: float | None,
+                      paysage: bool) -> None:
         # On retient l'orientation d'avant plutôt que de supposer le portrait :
         # les volets d'espèces sont en paysage, et une carte insérée là ne doit
         # pas les en faire sortir.
@@ -877,9 +902,8 @@ class Rapport:
         paragraphe.paragraph_format.keep_with_next = True
         paragraphe.add_run().add_picture(str(chemin), width=Cm(largeur))
         if legende:
-            self._legende("Carte", self._n_carte, legende, centree=True)
+            self._legende(etiquette, numero, legende, centree=True)
         self.orientation(paysage=avant)
-        return self._n_carte
 
     # ------------------------------------------------------------ pied, sortie
 

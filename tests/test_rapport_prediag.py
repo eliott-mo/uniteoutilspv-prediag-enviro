@@ -7,6 +7,7 @@ n'est présent » sous la couche BCAE 2 — ne se voyait que là.
 """
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -197,7 +198,7 @@ def _image(dossier, nom: str) -> Path:
 class DynamiqueDuSite(unittest.TestCase):
     """La série de photographies aériennes, la plus récente, puis la consigne."""
 
-    SUIVANT = "Prise en compte de la Trame verte et bleue"
+    SUIVANT = "Contexte topographique"
     SERIE = ("Photographies aériennes 1950-1965, 1965-1980, 2000-2005, "
              "2011-2015 et la plus récente — IGN, Géoplateforme")
 
@@ -261,6 +262,88 @@ class CartesDeZonages(unittest.TestCase):
         paragraphes = self._paragraphes()
         bibliographie = paragraphes[paragraphes.index("Bibliographie"):]
         self.assertIn("Fond de carte : Plan IGN — Géoplateforme", bibliographie)
+
+
+def _coupe(identifiant, nom, extremites, demi, distances, points, emprise,
+           lieux=()):
+    """Une coupe à 255 m partout, sauf aux points donnés {distance: altitude}."""
+    from prediag_enviro.coupes import profil
+    altitudes = [points.get(d, 255.0) for d in distances]
+    return profil.Coupe(identifiant=identifiant, nom=nom, extremites=extremites,
+                        depart=(0.0, 0.0), arrivee=(0.0, -distances[-1]),
+                        distances=distances, altitudes=altitudes,
+                        demi_longueur=demi, emprise=[emprise], lieux=list(lieux))
+
+
+class ContexteTopographique(unittest.TestCase):
+    """Les coupes retenues dans l'outil : leur plan, elles, ce qu'on en lit."""
+
+    SUIVANT = "Prise en compte de la Trame verte et bleue"
+
+    def _ecrire(self, coupes):
+        with tempfile.TemporaryDirectory() as dossier:
+            chemin = Path(dossier) / "essai.docx"
+            doc = coupes(dossier) if coupes else None
+            rp.ecrire(chemin, _projet(), coupes=doc)
+            return [p.text for p in Document(chemin).paragraphs]
+
+    def _deux_coupes(self, dossier):
+        from prediag_enviro.coupes import CoupesDuDocument
+        longue = _coupe("N-S_10km", "N-S", ("N", "S"), 5000.0,
+                        [5.0 * i for i in range(2001)], {400.0: 212.0, 6400.0: 398.0},
+                        (4900.0, 5100.0),
+                        lieux=[(300.0, "Le Mas Blanc"), (4350.0, "Bédarieux")])
+        libre = _coupe("libre_1", "Papeterie Vieille – N", ("Papeterie Vieille", "N"),
+                       None, [5.0 * i for i in range(353)], {0.0: 281.0, 1100.0: 222.0},
+                       (690.0, 880.0))
+        return CoupesDuDocument(
+            plan=_image(dossier, "plan.png"),
+            coupes=[(longue, _image(dossier, "a.png")), (libre, _image(dossier, "b.png"))],
+            altitudes_emprise=(249.0, 296.0), jour=date(2026, 11, 12),
+            pdf="coupes_topographiques_Bedarieux.pdf")
+
+    def test_avec_coupes(self):
+        paragraphes = self._ecrire(self._deux_coupes)
+        self.assertLess(paragraphes.index("Dynamique du site"),
+                        paragraphes.index("Contexte topographique"))
+        section = _section(paragraphes, "Contexte topographique", self.SUIVANT)
+        texte = "\n".join(section)
+        self.assertIn("La ZIP s'étend entre 249 et 296 m d'altitude (NGF)", texte)
+        self.assertRegex(texte, r"Carte \d+ : Localisation des coupes "
+                                r"topographiques retenues autour de la ZIP")
+        self.assertIn("Figure 1 : Coupe topographique N-S de 10 km, centrée sur "
+                      "la ZIP", section)
+        self.assertIn("Figure 2 : Coupe topographique depuis Papeterie Vieille, à "
+                      "travers la ZIP (1,8 km)", section)
+        self.assertIn("La coupe N-S de 10 km va de 212 à 398 m d'altitude. Son "
+                      "point haut, à 1,4 km au sud de la ZIP, la domine de 143 m. "
+                      "Lieux habités croisés : Le Mas Blanc, Bédarieux.", section)
+        self.assertIn("La coupe depuis Papeterie Vieille va de 222 à 281 m "
+                      "d'altitude. Son point haut, à 0,8 km de la ZIP en direction "
+                      "de Papeterie Vieille, la domine de 26 m.", section)
+        self.assertIn("[À compléter — lire sur les coupes", texte)
+        self.assertIn("coupes_topographiques_Bedarieux.pdf", texte)
+        self.assertIn("Sommaire des figures", paragraphes)
+        bibliographie = paragraphes[paragraphes.index("Bibliographie"):]
+        self.assertIn("IGN – RGE ALTI® (service altimétrique de la Géoplateforme) "
+                      "et BD TOPO® V3, consultés le 12/11/2026", bibliographie)
+
+    def test_sans_coupes(self):
+        paragraphes = self._ecrire(None)
+        section = [p for p in _section(paragraphes, "Contexte topographique",
+                                       self.SUIVANT) if p.strip()]
+        self.assertEqual(len(section), 1)
+        self.assertTrue(section[0].startswith(
+            "[À compléter — produire les coupes topographiques"))
+        self.assertNotIn("Sommaire des figures", paragraphes)
+
+    def test_point_haut_dans_la_zip(self):
+        coupe = _coupe("N-S_4km", "N-S", ("N", "S"), 2000.0,
+                       [5.0 * i for i in range(801)], {2000.0: 300.0, 100.0: 200.0},
+                       (1900.0, 2100.0))
+        self.assertEqual(rp._phrase_coupe(coupe),
+                         "La coupe N-S de 4 km va de 200 à 300 m d'altitude. Son "
+                         "point haut est dans la ZIP.")
 
 
 class LusALEspece(unittest.TestCase):

@@ -121,7 +121,8 @@ ouvert.
 
 ## Onglet B — le prédiag
 
-Six étapes, chacune avec son point de contrôle.
+Huit sections dans l'interface, chacune avec son point de contrôle. Les
+principales :
 
 1. **Périmètre du projet** — ZIP de shapefile, KML ou GeoJSON. Le contrôle
    d'entrée s'affiche avant tout calcul : entités, projection lue dans le
@@ -134,14 +135,18 @@ Six étapes, chacune avec son point de contrôle.
    65 / 30 / 4,9 %.
 3. **Aires d'étude** — immédiate et rapprochée, pré-remplies d'après le guide
    du ministère (2016), modifiables.
-4. **Sources d'espèces** — on dépose ce qu'on a trouvé : exports Excel ou CSV,
+4. **Zonages du patrimoine naturel** — croisés avec les aires d'étude, puis
+   leurs cartes.
+5. **Coupes topographiques** — huit coupes du relief autour de la ZIP, dont on
+   coche une à trois pour le document ; voir plus bas.
+6. **Sources d'espèces** — on dépose ce qu'on a trouvé : exports Excel ou CSV,
    PDF, captures d'écran. Trois étiquettes par fichier (commune, groupe,
    source), devinées du nom de fichier et corrigeables.
-5. **Liste recoupée** — appariement sur TaxRef, dédoublonnage par `cd_ref`,
+7. **Liste recoupée** — appariement sur TaxRef, dédoublonnage par `cd_ref`,
    date la plus récente retenue, conflits signalés. Les **non résolus** se
    corrigent à la main, et l'outil retient l'association pour les études
    suivantes.
-6. **Prédiagnostic Word** — le document complet, dans la forme du
+8. **Prédiagnostic Word** — le document complet, dans la forme du
    prédiagnostic interne de l'équipe.
 
 ### Le document produit
@@ -152,11 +157,13 @@ la responsable environnement complète.
 
 ```
 Page de garde                            site, surface, aires, date d'édition
-Sommaire · Sommaire des tableaux · Sommaire des cartes
+Sommaire · des tableaux · des cartes · des figures (s'il y a des coupes)
 Zone d'étude : analyse générale          surface, communes, aires, carte 1
 Patrimoine naturel                       dénombrement, tableaux, cartes 2 à 4
 Zones humides
 Espèces recensées sur la commune         un tableau par groupe
+Dynamique du site                        photographies aériennes, 1950 à aujourd'hui
+Contexte topographique                   plan et coupes retenues, en figures
 Conclusion                               note de risque de 0 à 10 par groupe
 Sources
 ```
@@ -307,6 +314,55 @@ SO) », « Oui (Massif central, Alpin : nicheur) ». Au-delà de 40 caractères,
 case dit « Oui (sous conditions) » et la condition passe sous le tableau, avec
 « … » quand BDC l'a coupée.
 
+### Les coupes topographiques
+
+Reprises du prototype de Mélina, validé sur Bédarieux le 12 novembre 2026, et
+de son brief « Module de coupes topographiques » (`src/prediag_enviro/coupes/`).
+Huit coupes autour du plus grand bloc de la ZIP — N-S, E-O, NE-SO, NO-SE, de 4
+et de 10 km, un point tous les 5 m —, chacune en trois bandeaux : les
+communes, le profil avec la ZIP, la végétation posée sur le terrain, les cours
+d'eau, les routes principales et les lieux habités, puis l'occupation du sol.
+Un plan de repérage les situe. Le tout sort en PNG, en un PDF et en JSON
+(profils, intervalles croisés, points haut et bas, altitudes de la ZIP).
+
+On en coche **une à trois** pour le prédiagnostic : elles y sont redessinées à
+la taille d'une page A4 couchée, avec un plan qui ne montre qu'elles, et la
+partie « Contexte topographique » dit ce que l'outil sait en dire — les
+altitudes de la ZIP, la plage de chaque coupe, la distance et la direction de
+son point haut et de combien il domine la ZIP, les lieux habités croisés. Lire
+d'où la ZIP se voit et ce qui l'écrante reste une consigne pour l'experte. Les
+huit coupes restent dans le PDF.
+
+Une **coupe libre** part d'un lieu habité, choisi dans la liste des hameaux
+classés par distance, ou d'un point de vue donné en latitude, longitude ; elle
+traverse la ZIP et la dépasse d'un kilomètre. Une **surface utile** déposée en
+plus se dessine en rouge sur la ZIP, pour une demande de compléments.
+
+Ce qui change par rapport au prototype :
+
+- les couches sont filtrées côté serveur et l'altimétrie part en POST JSON par
+  2 000 points : **18 s cache vide** sur Bédarieux, contre 2 min 13 ; ensuite
+  le cache (`%LOCALAPPDATA%\prediag-enviro\cache_coupes`, ~17 Mo par site)
+  évite tout appel ;
+- une étiquette ne se pose que sur une place libre, mesurée au rendu : le
+  prototype écartait les noms à 6 % de la longueur, ce qui ne suffit plus à la
+  taille du document ;
+- un nom de cours d'eau ne revient pas sur le même passage, la peupleraie
+  compte comme forêt fermée, et une réponse illisible du service est rejouée
+  comme une panne : le 12/11/2026, le WFS a rendu une page de métriques au lieu
+  du GeoJSON, et la même requête passait ensuite.
+
+Hors de l'interface, depuis le dossier de l'outil (en PowerShell,
+`$env:PYTHONPATH = "src"` d'abord) :
+
+```bash
+PYTHONPATH=src python -m prediag_enviro.coupes --emprise ZIP.zip --site Bédarieux --sortie coupes
+```
+
+`--surface-utile` et `--libelle-emprise "Emprise cadastrale"` reproduisent la
+configuration du prototype ; avec les deux KML de Mélina, sa surface utile
+déborde de 175 m² du cadastre, comme le brief l'annonce.
+
 ### Ce que l'onglet B ne fait pas
 
 Il ne va pas chercher les occurrences. Le choix des sources est un jugement
@@ -336,6 +392,7 @@ site de l'INPN est en reconstruction et les appels directs tombent.
 | **Zones humides (BCAE 2)** | ministère de l'Agriculture, par la Géoplateforme | zones humides et tourbières de la conditionnalité de la PAC |
 | **Orthoptères** | Sardet & Defaut 2004 | indice national de priorité et domaines biogéographiques, que BDC ne porte pas |
 | **Photographies aériennes** | IGN, par la Géoplateforme — lues au rendu des planches, datées de ce jour | six périodes, de 1950-1965 à la prise de vue la plus récente, pour la dynamique du site ; une période que l'IGN ne couvre pas est dite sur la planche et dans le texte |
+| **Relief et occupation du sol** | IGN, RGE ALTI® (service altimétrique) et BD TOPO® V3, par la Géoplateforme — lus au calcul des coupes, datés de ce jour | coupes topographiques : profil, végétation, communes, cours d'eau, routes, lieux habités |
 
 Source des référentiels de l'INPN : Muséum national d'Histoire naturelle /
 PatriNat (OFB-MNHN-CNRS-IRD) — <https://inpn.mnhn.fr/referentiels-donnees>.
@@ -597,11 +654,21 @@ Le Python de l'outil est `%LOCALAPPDATA%\prediag-enviro\venv\Scripts\python.exe`
   et sa lecture par les classeurs et par BDC ;
 - les planches de photographies aériennes, le fond simulé hors ligne ;
 - ce que le document écrit des zones humides, de la dynamique du site, des
-  taxons lus à l'espèce, et la phrase des PNA, vérifiés dans un document
-  réellement produit.
+  taxons lus à l'espèce, des coupes topographiques, et la phrase des PNA,
+  vérifiés dans un document réellement produit ;
+- les coupes : l'orientation des quatre directions, les intervalles croisés
+  sur des polygones fictifs, le dédoublonnage, le client IGN sur des réponses
+  enregistrées (pagination, plafond, reprises, réponse illisible), le cache,
+  l'assemblage et son JSON, et un rendu où aucune étiquette n'en chevauche une
+  autre ni la légende.
 
 Chaque cas porte sa donnée réelle ou un échantillon fabriqué : aucun
 référentiel n'est nécessaire. Les tests ne partent pas en production.
+
+La recette du brief sur Bédarieux appelle la vraie Géoplateforme et lit
+l'emprise du projet, qui n'est pas dans le dépôt : elle ne tourne que sur
+demande, `PREDIAG_RESEAU=1` (et `PREDIAG_EMPRISE_BEDARIEUX` si l'archive n'est
+pas dans le dossier du projet sur le OneDrive).
 
 ## Limites connues
 

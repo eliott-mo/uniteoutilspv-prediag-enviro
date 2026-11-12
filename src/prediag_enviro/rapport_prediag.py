@@ -1147,6 +1147,115 @@ def _dynamique_du_site(rapport: Rapport, photographies: list) -> None:
     )
 
 
+def _km(metres: float) -> str:
+    """1400 → « 1,4 », 10000 → « 10 »."""
+    return f"{metres / 1000:.1f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+#: Les directions qu'une extrémité de coupe peut porter : les autres sont des
+#: noms de lieux, ceux des coupes libres.
+_DIRECTIONS = {"N": "au nord", "NE": "au nord-est", "E": "à l'est",
+               "SE": "au sud-est", "S": "au sud", "SO": "au sud-ouest",
+               "O": "à l'ouest", "NO": "au nord-ouest"}
+
+_NOMBRES = {1: "une", 2: "deux", 3: "trois", 4: "quatre", 5: "cinq"}
+
+
+def _nom_coupe(coupe) -> str:
+    if coupe.demi_longueur:
+        return f"La coupe {coupe.nom} de {_km(coupe.longueur)} km"
+    return f"La coupe depuis {coupe.extremites[0]}"
+
+
+def _legende_coupe(coupe) -> str:
+    if coupe.demi_longueur:
+        return (f"Coupe topographique {coupe.nom} de {_km(coupe.longueur)} km, "
+                "centrée sur la ZIP")
+    return (f"Coupe topographique depuis {coupe.extremites[0]}, à travers la ZIP "
+            f"({_km(coupe.longueur)} km)")
+
+
+def _phrase_coupe(coupe) -> str:
+    """Ce que l'outil sait dire d'une coupe : son relief, et qui domine la ZIP.
+
+    Le point haut se situe par rapport au milieu de la ZIP sur le trait, du
+    côté d'une extrémité — une direction, ou le lieu d'où part une coupe
+    libre. Un relief qui domine la ZIP est un lieu d'où elle peut se voir :
+    c'est à l'experte de le dire, mais le chiffre lui revient d'ici.
+    """
+    (_, z_bas), (d_haut, z_haut) = coupe.point_bas, coupe.point_haut
+    phrase = (f"{_nom_coupe(coupe)} va de {z_bas:.0f} à {z_haut:.0f} m "
+              "d'altitude.")
+    if coupe.emprise:
+        a, b = max(coupe.emprise, key=lambda i: i[1] - i[0])
+        z_zip = sorted(coupe.altitudes_emprise())
+        mediane = z_zip[len(z_zip) // 2] if z_zip else None
+        if a <= d_haut <= b:
+            phrase += " Son point haut est dans la ZIP."
+        elif mediane is not None:
+            cote = coupe.extremites[0] if d_haut < (a + b) / 2 else coupe.extremites[1]
+            ecart = _km(abs(d_haut - (a + b) / 2))
+            if cote in _DIRECTIONS:
+                ou = f"à {ecart} km {_DIRECTIONS[cote]} de la ZIP"
+            else:
+                ou = f"à {ecart} km de la ZIP en direction de {cote}"
+            phrase += f" Son point haut, {ou}"
+            if z_haut - mediane >= 5:
+                phrase += f", la domine de {z_haut - mediane:.0f} m."
+            else:
+                phrase += ", est à peine plus haut qu'elle."
+    lieux = [nom for _, nom in coupe.lieux]
+    if lieux:
+        phrase += f" Lieux habités croisés : {', '.join(lieux)}."
+    return phrase
+
+
+def _contexte_topographique(rapport: Rapport, coupes) -> None:
+    """Les coupes retenues dans l'outil, et ce qu'elles disent du relief.
+
+    Les textes d'abord, puis le plan et les coupes à la suite, en paysage : une
+    phrase posée avant chaque figure resterait seule sur sa page en portrait.
+    Tracer les coupes revient à l'outil ; lire d'où la ZIP se voit et ce qui
+    l'écrante revient à l'experte.
+    """
+    rapport.partie("Contexte topographique")
+    if coupes is None or not coupes.coupes:
+        rapport.a_completer(
+            "produire les coupes topographiques (section « Coupes "
+            "topographiques » de l'outil), en retenir une à trois, puis "
+            "régénérer ce document")
+        return
+    n = len(coupes.coupes)
+    phrase = ""
+    if coupes.altitudes_emprise:
+        bas, haut = coupes.altitudes_emprise
+        phrase = (f"La ZIP s'étend entre {bas:.0f} et {haut:.0f} m d'altitude "
+                  "(NGF), d'après le RGE ALTI de l'IGN. ")
+    if n == 1:
+        phrase += ("La coupe ci-après la situe dans son relief, avec les "
+                   "boisements, les cours d'eau, les routes principales et les "
+                   "lieux habités qu'elle croise ; la carte qui la précède la "
+                   "localise.")
+    else:
+        phrase += (f"Les {_NOMBRES.get(n, str(n))} coupes ci-après la situent "
+                   "dans son relief, avec les boisements, les cours d'eau, les "
+                   "routes principales et les lieux habités qu'elles croisent ; "
+                   "la carte qui les précède les localise.")
+    rapport.para(phrase)
+    for coupe, _ in coupes.coupes:
+        rapport.para(_phrase_coupe(coupe))
+    rapport.a_completer(
+        "lire sur les coupes d'où la ZIP peut être vue — lieux habités, routes, "
+        "points hauts — et ce qui l'écrante (relief, boisements) ; les huit "
+        f"coupes calculées par l'outil sont dans le fichier « {coupes.pdf} »")
+    avant = rapport.orientation(paysage=True)
+    rapport.carte(coupes.plan, "Localisation des coupes topographiques retenues "
+                               "autour de la ZIP")
+    for coupe, image in coupes.coupes:
+        rapport.figure(image, _legende_coupe(coupe))
+    rapport.orientation(paysage=avant)
+
+
 def _trame_verte_et_bleue(rapport: Rapport) -> None:
     rapport.partie("Prise en compte de la Trame verte et bleue")
     rapport.a_completer(
@@ -1305,13 +1414,17 @@ def ecrire(chemin: Path, projet: Projet, *, resultat_zonages=None,
            cartes=(), resultat_especes=None, contexte=None,
            citations: list[str] | None = None,
            modele: Path | None = None,
-           cadre: Path | None = None) -> tuple[Path, list[str]]:
+           cadre: Path | None = None,
+           coupes=None) -> tuple[Path, list[str]]:
     """Produit le prédiagnostic. Renvoie (chemin, styles qu'il a fallu recréer).
 
     Tout est optionnel sauf le projet : un document produit avant le croisement
     des zonages doit sortir quand même, avec à leur place une consigne qui dit
     quelle section de l'outil lancer. Refuser de produire obligerait à tout
     faire dans l'ordre, et un prédiagnostic se construit par allers-retours.
+
+    `coupes` porte les coupes topographiques retenues dans l'outil
+    (`coupes.CoupesDuDocument`), ou rien.
     """
     rapport = Rapport(modele)
     cartes = list(cartes or [])
@@ -1321,7 +1434,7 @@ def ecrire(chemin: Path, projet: Projet, *, resultat_zonages=None,
                      if f in par_famille]
 
     _page_de_garde(rapport, projet)
-    rapport.sommaire()
+    rapport.sommaire(avec_figures=bool(coupes is not None and coupes.coupes))
 
     cadre_insere = _cadre_et_methodologies(rapport, projet, situation,
                                            cadre)
@@ -1329,6 +1442,7 @@ def ecrire(chemin: Path, projet: Projet, *, resultat_zonages=None,
                   resultat_especes, contexte,
                   _especes_a_pna(resultat_especes, contexte))
     _dynamique_du_site(rapport, photographies)
+    _contexte_topographique(rapport, coupes)
     _trame_verte_et_bleue(rapport)
     _annexes(rapport, projet, resultat_especes, contexte)
 
@@ -1346,6 +1460,11 @@ def ecrire(chemin: Path, projet: Projet, *, resultat_zonages=None,
             lignes_sources.append(
                 carte.fond + (f", consultées le {carte.date}" if carte.date
                               else ""))
+    if coupes is not None and coupes.coupes:
+        jour = coupes.jour.strftime("%d/%m/%Y") if coupes.jour else ""
+        lignes_sources.append(
+            "IGN – RGE ALTI® (service altimétrique de la Géoplateforme) et "
+            "BD TOPO® V3" + (f", consultés le {jour}" if jour else ""))
     for source in getattr(resultat_zonages, "sources_locales", []) or []:
         lignes_sources.append(f"{source.type_libelle} : {source.citation}")
     if resultat_especes is not None and resultat_especes.especes:
