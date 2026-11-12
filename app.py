@@ -44,6 +44,7 @@ from prediag_enviro import chemins  # noqa: E402
 from prediag_enviro import sources_locales as mod_sources  # noqa: E402
 from prediag_enviro import rapport_prediag as mod_prediag  # noqa: E402
 from prediag_enviro import coupes as mod_coupes  # noqa: E402
+from prediag_enviro import sommaires as mod_sommaires  # noqa: E402
 from prediag_enviro.memoire import ACCEPTE, A_REVOIR, DECISIONS, REFUSE  # noqa: E402
 
 #: Le picto de l'outil, devant son titre et dans l'onglet du navigateur : les
@@ -1305,6 +1306,17 @@ with onglet_b:
                     modele=chemin_modele,
                     coupes=coupes_document,
                 )
+            # Seul Word sait où tombent les pages : il calcule les sommaires
+            # ici, une fois pour toutes, plutôt qu'à l'ouverture du document,
+            # où il mettait « 1 » partout depuis une pièce jointe.
+            with st.spinner("Word calcule les numéros de page des sommaires "
+                            "(environ une minute pour 200 pages)…"):
+                sommaires_manques = mod_sommaires.calculer(sortie)
+            if sommaires_manques:
+                st.warning(
+                    "Sommaires sans numéros de page. " + sommaires_manques
+                    + " Dans Word : Ctrl+A puis F9, deux fois."
+                )
             if recrees:
                 st.warning(
                     "Styles absents du modèle, recréés à l'approchant : "
@@ -1320,8 +1332,9 @@ with onglet_b:
             )
             st.caption(
                 "Les passages en couleur du document signalent ce qui reste à "
-                "compléter. À la première ouverture, Word met les sommaires à "
-                "jour ; si ce n'est pas le cas, Ctrl+A puis F9. Les sources et "
-                "leurs dates sont reportées en fin de document — la Licence "
-                "Ouverte l'exige."
+                "compléter. Les numéros de page des sommaires valent pour le "
+                "document tel qu'il sort ; une fois complété, mettez-les à "
+                "jour (clic droit sur un sommaire, « Mettre à jour les "
+                "champs »). Les sources et leurs dates sont reportées en fin "
+                "de document — la Licence Ouverte l'exige."
             )

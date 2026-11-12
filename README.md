@@ -270,13 +270,23 @@ Les numéros de tableaux et de cartes sont posés dans des champs `SEQ`, avec
 leur valeur déjà calculée. Deux conséquences : Word peut les recalculer si
 quelqu'un insère un tableau au milieu, et les **sommaires des tableaux et des
 cartes** se construisent tout seuls — sans champ `SEQ`, Word ne saurait pas
-distinguer un tableau d'une carte. Le document demande la mise à jour des
-champs à l'ouverture ; à défaut, Ctrl+A puis F9.
+distinguer un tableau d'une carte.
+
+Les **numéros de page des sommaires** sont calculés par Word au moment de
+produire le document (`sommaires.py`). L'outil le lance en arrière-plan, sans
+fenêtre, sur une copie locale ; il faut une minute pour les 186 pages de
+Bédarieux. Le document ne demande plus rien à Word à l'ouverture. Avant, ouvert
+depuis une pièce jointe, il passait par le mode protégé, et à « Activer la
+modification » Word recalculait les sommaires avant d'avoir mis le document en
+pages : « 1 » à chaque entrée. Sans Word, l'interface le signale, et les
+sommaires gardent leur consigne : Ctrl+A puis F9, deux fois.
 
 Chaque carte occupe une **page en paysage**, comme dans le prédiagnostic de
 référence. Les poser en portrait obligeait à les réduire à 16 cm de large,
 soit la moitié de leur définition utile, et les toponymes du fond de plan
-devenaient illisibles.
+devenaient illisibles. Deux cartes qui se suivent partagent leur section, et
+chacune ouvre sa page : rétablir le portrait entre elles laissait une page
+blanche.
 
 Ce que l'outil écrit lui-même : les dénombrements (« dans l'aire d'étude
 rapprochée, on recense 5 ZNIEFF de type I et 1 ZNIEFF de type II »), les
@@ -655,7 +665,10 @@ Le Python de l'outil est `%LOCALAPPDATA%\prediag-enviro\venv\Scripts\python.exe`
 - les planches de photographies aériennes, le fond simulé hors ligne ;
 - ce que le document écrit des zones humides, de la dynamique du site, des
   taxons lus à l'espèce, des coupes topographiques, et la phrase des PNA,
-  vérifiés dans un document réellement produit ;
+  vérifiés dans un document réellement produit ; et sa mise en page : aucune
+  section vide, aucun champ que Word recalculerait à l'ouverture ;
+- les sommaires calculés par Word, et ce que l'outil fait quand Word manque
+  ou se fige (Word simulé) ;
 - les coupes : l'orientation des quatre directions, les intervalles croisés
   sur des polygones fictifs, le dédoublonnage, le client IGN sur des réponses
   enregistrées (pagination, plafond, reprises, réponse illisible), le cache,
@@ -668,7 +681,8 @@ référentiel n'est nécessaire. Les tests ne partent pas en production.
 La recette du brief sur Bédarieux appelle la vraie Géoplateforme et lit
 l'emprise du projet, qui n'est pas dans le dépôt : elle ne tourne que sur
 demande, `PREDIAG_RESEAU=1` (et `PREDIAG_EMPRISE_BEDARIEUX` si l'archive n'est
-pas dans le dossier du projet sur le OneDrive).
+pas dans le dossier du projet sur le OneDrive). De même, la recette des
+sommaires lance le vrai Word : `PREDIAG_WORD=1`.
 
 ## Limites connues
 

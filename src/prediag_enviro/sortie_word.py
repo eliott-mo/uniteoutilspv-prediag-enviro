@@ -301,8 +301,7 @@ def _element(balise: str, **attributs):
     return noeud
 
 
-def _champ(paragraphe, instruction: str, resultat: str = "",
-           recalculer: bool = False) -> None:
+def _champ(paragraphe, instruction: str, resultat: str = "") -> None:
     """Insère un champ Word, avec son résultat déjà calculé.
 
     Le résultat compte autant que l'instruction. Un champ sans résultat
@@ -310,11 +309,11 @@ def _champ(paragraphe, instruction: str, resultat: str = "",
     convertisseur, un aperçu ou un export PDF automatique montrerait des
     légendes « Tableau  : » sans numéro. On écrit donc le numéro qu'on a
     calculé, et Word le recalcule s'il le juge utile.
+
+    Aucun champ n'est marqué à recalculer (`w:dirty`) : Word le ferait à
+    l'ouverture, avant d'avoir mis le document en pages (voir `sommaire`).
     """
-    debut = _element("w:fldChar", w_fldCharType="begin")
-    if recalculer:
-        debut.set(qn("w:dirty"), "true")
-    paragraphe._p.append(_passage(debut))
+    paragraphe._p.append(_passage(_element("w:fldChar", w_fldCharType="begin")))
 
     texte = _element("w:instrText")
     texte.set(qn("xml:space"), "preserve")
@@ -525,42 +524,46 @@ class Rapport:
 
     def sommaire(self, avec_tableaux: bool = True,
                  avec_cartes: bool = True, avec_figures: bool = False) -> None:
-        """Sommaire des parties, puis des tableaux et des cartes.
+        """Sommaire des parties, puis des tableaux, des cartes et des figures.
 
-        Les trois sont des champs : Word les remplit à l'ouverture, parce que
-        seuls les numéros de page le renseignent et qu'ils dépendent de la mise
-        en page finale. Le texte de remplacement dit quoi faire si le document
-        est ouvert dans un éditeur qui ne calcule pas les champs.
+        Ce sont des champs `TOC`, dont les numéros de page dépendent de la
+        mise en page finale, que seul Word connaît : `sommaires.calculer` les
+        lui fait calculer une fois le document écrit. Le document ne lui
+        demande plus de le faire à l'ouverture. Ouvert depuis une pièce
+        jointe, Word s'en chargeait à « Activer la modification », avant
+        d'avoir mis le document en pages, et écrivait « 1 » à chaque entrée ;
+        ouvert directement, il décalait tout d'une page, le sommaire rempli
+        repoussant ce qui le suit (Bédarieux, 12 novembre 2026). Sans Word,
+        la consigne reste à leur place et dit quoi faire.
 
         Les sommaires des tableaux et des cartes reposent sur les champs `SEQ`
         posés dans les légendes : sans eux, Word ne saurait pas distinguer un
         tableau d'une carte.
         """
-        consigne = "Sommaire à mettre à jour : Ctrl+A puis F9."
+        # Deux fois : la première remplit les sommaires, qui repoussent ce qui
+        # les suit ; la seconde remet leurs numéros de page d'aplomb.
+        consigne = "Sommaire à mettre à jour : Ctrl+A puis F9, deux fois."
 
         self._titre_sommaire("Sommaire")
         paragraphe = self.document.add_paragraph()
-        _champ(paragraphe, r' TOC \o "1-2" \h \z \u ', consigne, recalculer=True)
+        _champ(paragraphe, r' TOC \o "1-2" \h \z \u ', consigne)
 
         if avec_tableaux:
             self._titre_sommaire("Sommaire des tableaux")
             paragraphe = self.document.add_paragraph()
-            _champ(paragraphe, r' TOC \h \z \c "Tableau" ', consigne,
-                   recalculer=True)
+            _champ(paragraphe, r' TOC \h \z \c "Tableau" ', consigne)
 
         if avec_cartes:
             self._titre_sommaire("Sommaire des cartes")
             paragraphe = self.document.add_paragraph()
-            _champ(paragraphe, r' TOC \h \z \c "Carte" ', consigne,
-                   recalculer=True)
+            _champ(paragraphe, r' TOC \h \z \c "Carte" ', consigne)
 
         # Les figures n'existent que si des coupes topographiques ont été
         # retenues : un sommaire vide ne dirait rien à personne.
         if avec_figures:
             self._titre_sommaire("Sommaire des figures")
             paragraphe = self.document.add_paragraph()
-            _champ(paragraphe, r' TOC \h \z \c "Figure" ', consigne,
-                   recalculer=True)
+            _champ(paragraphe, r' TOC \h \z \c "Figure" ', consigne)
 
         self.saut_de_page()
 
@@ -802,7 +805,14 @@ class Rapport:
 
         L'en-tête et le pied de page suivent : une nouvelle section hérite des
         références de la précédente tant qu'on ne les délie pas.
+
+        Une section restée vide est retirée plutôt que suivie d'une autre.
+        Entre deux cartes en paysage, rétablir le portrait puis le quitter
+        aussitôt laissait une page blanche — à Bédarieux, le 12 novembre
+        2026, entre les deux photographies aériennes.
         """
+        if self._retirer_section_vide() and self._paysage == paysage:
+            return
         section = self.document.add_section(WD_SECTION.NEW_PAGE)
         largeur, hauteur = section.page_width, section.page_height
         voulu_paysage = largeur > hauteur
@@ -811,6 +821,33 @@ class Rapport:
                                    else WD_ORIENT.PORTRAIT)
             section.page_width, section.page_height = hauteur, largeur
         self._paysage = paysage
+
+    def _retirer_section_vide(self) -> bool:
+        """Retire la dernière section si rien n'y a été écrit.
+
+        `add_section` ferme la section courante sur un paragraphe vide qui
+        porte sa `w:sectPr` ; la nouvelle section prend celle du corps. Si ce
+        paragraphe est encore le dernier du corps, la nouvelle section est
+        vide : on le retire et on rend au corps la `w:sectPr` qu'il portait,
+        comme si la section n'avait jamais été ouverte. Renvoie vrai dans ce
+        cas, et l'orientation courante redevient celle d'avant.
+        """
+        corps = self.document.element.body
+        sentinelle = corps.sectPr
+        precedent = sentinelle.getprevious() if sentinelle is not None else None
+        if precedent is None or precedent.tag != qn("w:p"):
+            return False
+        proprietes = precedent.pPr
+        if proprietes is None or proprietes.sectPr is None:
+            return False
+        if any(enfant is not proprietes for enfant in precedent):
+            return False  # le paragraphe porte autre chose que la section
+        fermee = proprietes.sectPr
+        corps.remove(precedent)
+        corps.replace(sentinelle, fermee)
+        section = self.document.sections[-1]
+        self._paysage = section.page_width > section.page_height
+        return True
 
     def orientation(self, paysage: bool) -> bool:
         """Bascule la suite du document, si elle n'y est pas déjà.
@@ -899,6 +936,11 @@ class Rapport:
 
         paragraphe = self.document.add_paragraph()
         paragraphe.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        # Chaque illustration ouvre sa page, y compris quand elle en suit une
+        # autre dans la même section : depuis qu'aucune section vide ne
+        # s'intercale plus entre elles, les deux photographies aériennes en
+        # partagent une.
+        paragraphe.paragraph_format.page_break_before = True
         paragraphe.paragraph_format.keep_with_next = True
         paragraphe.add_run().add_picture(str(chemin), width=Cm(largeur))
         if legende:
@@ -930,19 +972,7 @@ class Rapport:
             for passage in paragraphe.runs:
                 passage.font.size = Pt(8)
 
-    def _recalculer_champs(self) -> None:
-        """Demande à Word de mettre les champs à jour à l'ouverture.
-
-        Sans cela, le sommaire reste sur la consigne de remplacement jusqu'à
-        ce que quelqu'un pense à presser F9 — et personne n'y pense.
-        """
-        parametres = self.document.settings.element
-        if parametres.find(qn("w:updateFields")) is None:
-            noeud = _element("w:updateFields", w_val="true")
-            parametres.append(noeud)
-
     def enregistrer(self, chemin: Path) -> Path:
-        self._recalculer_champs()
         chemin = Path(chemin)
         chemin.parent.mkdir(parents=True, exist_ok=True)
         self.document.save(str(chemin))

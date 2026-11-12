@@ -146,7 +146,9 @@ GROUPES: tuple[GroupePrediag, ...] = (
     GroupePrediag("insectes", "Autres insectes", "faune",
                   ("Hyménoptères", "Diptères", "Hémiptères", "Insectes"),
                   "d'insectes"),
-    GroupePrediag("autres", "Autres groupes", "faune", (), "d'espèces"),
+    # « d'autres groupes » et non « d'espèces » : l'annexe s'intitulait
+    # « Liste des espèces d'espèces recensées sur la commune ».
+    GroupePrediag("autres", "Autres groupes", "faune", (), "d'autres groupes"),
 )
 
 #: Les trois volets que le prédiagnostic externe traite dans son état

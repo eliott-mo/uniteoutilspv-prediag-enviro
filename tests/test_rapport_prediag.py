@@ -195,6 +195,29 @@ def _image(dossier, nom: str) -> Path:
     return chemin
 
 
+def _contenu_des_sections(document) -> list[int]:
+    """Pour chaque section, combien d'éléments portent du texte, une image ou
+    un tableau. Une section à zéro est une page blanche dans Word.
+
+    Une section se ferme sur le paragraphe qui porte sa `w:sectPr` ; la
+    dernière, sur la `w:sectPr` du corps.
+    """
+    from docx.oxml.ns import qn
+    comptes, compte = [], 0
+    for enfant in document.element.body.iterchildren():
+        if enfant.tag == qn("w:tbl"):
+            compte += 1
+        elif enfant.tag == qn("w:p"):
+            if enfant.xpath(".//w:t[normalize-space()] | .//w:drawing"):
+                compte += 1
+            if enfant.xpath("./w:pPr/w:sectPr"):
+                comptes.append(compte)
+                compte = 0
+        elif enfant.tag == qn("w:sectPr"):
+            comptes.append(compte)
+    return comptes
+
+
 class DynamiqueDuSite(unittest.TestCase):
     """La série de photographies aériennes, la plus récente, puis la consigne."""
 
@@ -202,22 +225,42 @@ class DynamiqueDuSite(unittest.TestCase):
     SERIE = ("Photographies aériennes 1950-1965, 1965-1980, 2000-2005, "
              "2011-2015 et la plus récente — IGN, Géoplateforme")
 
-    def test_avec_photographies(self):
+    def _planches(self, dossier):
         from prediag_enviro import cartes
+        return [
+            cartes.Carte(famille="ortho_evolution",
+                         titre="Évolution de l'occupation du sol",
+                         chemin=_image(dossier, "e.png"), nb_zonages=0,
+                         fond=self.SERIE, date="08/11/2026",
+                         absentes=("1980-1995",)),
+            cartes.Carte(famille="ortho_actuelle",
+                         titre=cartes.ORTHO_ACTUELLE["titre"],
+                         chemin=_image(dossier, "a.png"), nb_zonages=0,
+                         fond=cartes.ORTHO_ACTUELLE["attribution"],
+                         date="08/11/2026"),
+        ]
+
+    def test_pas_de_page_blanche_entre_les_photographies(self):
+        # Bédarieux, 12 novembre 2026 : entre la planche des six périodes et
+        # la photographie la plus récente, toutes deux en paysage, l'outil
+        # rouvrait une section portrait aussitôt refermée — une page blanche,
+        # la 46e, juste avant le contexte topographique.
         with tempfile.TemporaryDirectory() as dossier:
-            planches = [
-                cartes.Carte(famille="ortho_evolution",
-                             titre="Évolution de l'occupation du sol",
-                             chemin=_image(dossier, "e.png"), nb_zonages=0,
-                             fond=self.SERIE, date="08/11/2026",
-                             absentes=("1980-1995",)),
-                cartes.Carte(famille="ortho_actuelle",
-                             titre=cartes.ORTHO_ACTUELLE["titre"],
-                             chemin=_image(dossier, "a.png"), nb_zonages=0,
-                             fond=cartes.ORTHO_ACTUELLE["attribution"],
-                             date="08/11/2026"),
-            ]
-            paragraphes = _paragraphes(cartes=planches)
+            chemin = Path(dossier) / "essai.docx"
+            rp.ecrire(chemin, _projet(), cartes=self._planches(dossier))
+            document = Document(chemin)
+        self.assertNotIn(0, _contenu_des_sections(document))
+        # Les deux photographies partagent désormais leur section : chacune
+        # doit quand même ouvrir sa page.
+        illustrees = [p for p in document.paragraphs
+                      if p._p.xpath(".//w:drawing")]
+        self.assertEqual(len(illustrees), 2)
+        for paragraphe in illustrees:
+            self.assertTrue(paragraphe.paragraph_format.page_break_before)
+
+    def test_avec_photographies(self):
+        with tempfile.TemporaryDirectory() as dossier:
+            paragraphes = _paragraphes(cartes=self._planches(dossier))
         texte = " ".join(_section(paragraphes, "Dynamique du site",
                                   self.SUIVANT))
         self.assertIn("Évolution de l'occupation du sol", texte)
@@ -367,6 +410,47 @@ class LusALEspece(unittest.TestCase):
 
     def test_aucun(self):
         self.assertEqual(rp._phrase_lus_a_l_espece([]), "")
+
+
+class IntitulesDesGroupes(unittest.TestCase):
+    """Les titres d'annexe et les dénombrements que forment les groupes."""
+
+    def test_pas_d_especes_d_especes(self):
+        # Bédarieux, 12 novembre 2026 : l'annexe VII.14 s'intitulait « Liste
+        # des espèces d'espèces recensées sur la commune de Bédarieux ».
+        from prediag_enviro.statuts_especes import GROUPES
+        for groupe in GROUPES:
+            titre = f"Liste des espèces {groupe.complement} recensées"
+            self.assertNotIn("espèces d'espèces", titre, groupe.cle)
+        autres = next(g for g in GROUPES if g.cle == "autres")
+        self.assertEqual(f"Liste des espèces {autres.complement} recensées",
+                         "Liste des espèces d'autres groupes recensées")
+
+
+class SommairesALOuverture(unittest.TestCase):
+    """Le document ne demande plus à Word de recalculer ses sommaires.
+
+    Bédarieux, 12 novembre 2026 : ouvert depuis une pièce jointe, le prédiag
+    passait par le mode protégé ; à « Activer la modification », Word
+    recalculait les sommaires avant d'avoir mis le document en pages, et
+    écrivait « 1 » à chaque entrée. Ouvert directement, il les décalait d'une
+    page : le sommaire, une fois rempli, repousse tout ce qui le suit. Les
+    numéros sont désormais calculés une fois pour toutes, par
+    `sommaires.calculer`, au moment de produire le document.
+    """
+
+    def test_ni_champ_a_recalculer_ni_mise_a_jour_demandee(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as dossier:
+            chemin = Path(dossier) / "essai.docx"
+            rp.ecrire(chemin, _projet())
+            with zipfile.ZipFile(chemin) as archive:
+                parametres = archive.read("word/settings.xml").decode("utf-8")
+                corps = archive.read("word/document.xml").decode("utf-8")
+        self.assertNotIn("w:updateFields", parametres)
+        self.assertNotIn("w:dirty", corps)
+        # Sans Word pour les calculer, la consigne reste lisible à leur place.
+        self.assertIn("Sommaire à mettre à jour", corps)
 
 
 if __name__ == "__main__":
